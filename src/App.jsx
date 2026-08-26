@@ -4,7 +4,7 @@
  * Application de gestion de stock et de ventes.
  */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Plus, Minus, Trash2, Package, ShoppingCart, History, Settings, AlertTriangle, X, Check, Lock, LogOut, ClipboardList, WifiOff, RefreshCw, UserPlus, User, Clock, PenTool, Receipt } from "lucide-react";
+import { Plus, Minus, Trash2, Package, ShoppingCart, History, Settings, AlertTriangle, X, Check, Lock, LogOut, ClipboardList, WifiOff, RefreshCw, UserPlus, User, Clock, PenTool, Receipt, Wrench, Wine, ShoppingBag, Hammer } from "lucide-react";
 import { storage } from "./storage.js";
 
 /* ---------- Design tokens ----------
@@ -25,6 +25,19 @@ const BUSINESS_TYPES = {
   menuiserie: { label: "Menuiserie", icon: "🪵", categories: ["Bois", "Panneaux", "Quincaillerie bois", "Outils"] },
   quincaillerie: { label: "Quincaillerie", icon: "🔩", categories: ["Outillage", "Fixations", "Peinture", "Électricité", "Plomberie"] },
 };
+
+/* ---------- Code d'accès pour créer un nouveau commerce ----------
+   Personne ne peut créer son propre commerce sans ce code : c'est TOI (le gérant
+   de Moïse Tech Énergie) qui le communique, une fois que tu as fait la démo et
+   que le commerçant a confirmé vouloir s'abonner. Change cette valeur quand tu veux.
+------------------------------------------------------------------- */
+const OWNER_ACCESS_PIN = "0635Lemon@";
+
+/* ---------- Espace développeur : voir tous les commerces créés ----------
+   Code séparé du PIN gérant ci-dessus. Change-le aussi quand tu veux.
+------------------------------------------------------------------- */
+const DEV_ACCESS_PIN = "0635DevMTE@";
+const SHOPS_REGISTRY_KEY = "shops_registry";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -86,23 +99,6 @@ function useShared(key, fallback, pendingRef, onSyncChange) {
       }
     })();
     return () => { cancelled = true; };
-  }, [key]);
-
-  // Synchronisation périodique : garde plusieurs appareils/employés à jour.
-  // On n'écrase jamais une valeur locale pas encore synchronisée (voir pendingRef).
-  useEffect(() => {
-    if (!key) return;
-    const interval = setInterval(async () => {
-      if (pendingRef.current.has(key)) return;
-      try {
-        const res = await storage.get(key, true);
-        const next = res ? JSON.parse(res.value) : fallback;
-        setValue((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
-      } catch (e) {
-        // silencieux : nouvelle tentative au prochain intervalle
-      }
-    }, 20000);
-    return () => clearInterval(interval);
   }, [key]);
 
   const tryPersist = useCallback(async (next) => {
@@ -210,7 +206,40 @@ function PinPad({ title, subtitle, onSubmit, onCancel, error }) {
   );
 }
 
-/* ---------- Signature électronique de prise de service ---------- */
+/* ---------- Portail mot de passe libre (ex : Espace gérant) ---------- */
+function PasswordGate({ title, subtitle, onSubmit, onCancel, error }) {
+  const [value, setValue] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#00000099" }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-6 space-y-4 text-center" style={{ background: "#242A25", border: "1px solid #37403A" }}>
+        <Lock size={22} style={{ color: "#C08A3E" }} className="mx-auto" />
+        <div>
+          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#EDE6D6" }} className="text-lg">{title}</h3>
+          {subtitle && <p className="text-xs mt-1" style={{ color: "#9CA79E" }}>{subtitle}</p>}
+        </div>
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && value) onSubmit(value); }}
+          autoFocus
+          className="w-full px-4 py-3 rounded-lg text-center outline-none text-lg"
+          style={{ background: "#1B1F1C", border: "1px solid #37403A", color: "#EDE6D6", fontFamily: "'IBM Plex Mono', monospace" }}
+        />
+        {error && <p className="text-xs" style={{ color: "#B5533C" }}>{error}</p>}
+        <button
+          disabled={!value}
+          onClick={() => onSubmit(value)}
+          className="w-full py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
+          style={{ background: "#C08A3E", color: "#1B1F1C" }}
+        >
+          Valider
+        </button>
+        <button onClick={onCancel} className="text-xs" style={{ color: "#9CA79E" }}>Annuler</button>
+      </div>
+    </div>
+  );
+}
 function SignaturePad({ name, onSign, onCancel }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
@@ -285,10 +314,124 @@ function SignaturePad({ name, onSign, onCancel }) {
   );
 }
 
-/* ---------- Création / adhésion à un commerce (multi-boutique) ---------- */
-function ShopScreen({ onCreate, onJoin }) {
+/* ---------- Vitrine des catégories de commerce (écran d'accueil) ---------- */
+const CATEGORY_SHOWCASE = [
+  { key: "quincaillerie", label: "Quincaillerie", Icon: Wrench, from: "#8A6A2E", to: "#C08A3E" },
+  { key: "bar", label: "Bar / Restauration", Icon: Wine, from: "#6E8C77", to: "#3F5A47" },
+  { key: "boutique", label: "Boutique", Icon: ShoppingBag, from: "#B5533C", to: "#7A3826" },
+  { key: "menuiserie", label: "Menuiserie", Icon: Hammer, from: "#7A5A3E", to: "#4A3620" },
+];
+
+function CategoryShowcase() {
+  return (
+    <div className="grid grid-cols-2 gap-2.5 mb-1">
+      {CATEGORY_SHOWCASE.map(({ key, label, Icon, from, to }) => (
+        <div
+          key={key}
+          className="aspect-square rounded-xl flex flex-col items-center justify-center gap-1.5 overflow-hidden relative"
+          style={{ background: `linear-gradient(150deg, ${from}, ${to})`, border: "1px solid #37403A" }}
+        >
+          <Icon size={26} style={{ color: "#EDE6D6" }} strokeWidth={1.6} />
+          <span
+            className="text-[11px] text-center px-2 leading-tight"
+            style={{ color: "#EDE6D6", fontFamily: "'Fraunces', serif" }}
+          >
+            {label}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Espace développeur : liste de tous les commerces ---------- */
+function DevPanel({ onOpenShop, onClose }) {
+  const [gate, setGate] = useState(true);
+  const [error, setError] = useState("");
+  const [shops, setShops] = useState(null);
+  const [loadError, setLoadError] = useState("");
+
+  const handlePin = async (pin) => {
+    if (pin !== DEV_ACCESS_PIN) { setError("Code incorrect."); return; }
+    setGate(false);
+    setError("");
+    try {
+      const res = await storage.get(SHOPS_REGISTRY_KEY, true);
+      const list = res ? JSON.parse(res.value) : [];
+      list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      setShops(list);
+    } catch (e) {
+      setLoadError("Impossible de charger la liste des commerces.");
+      setShops([]);
+    }
+  };
+
+  if (gate) {
+    return (
+      <PasswordGate
+        title="Code développeur"
+        subtitle="Réservé au concepteur de l'application"
+        onSubmit={handlePin}
+        onCancel={onClose}
+        error={error}
+      />
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#1B1F1Ccc" }}>
+      <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-lg p-5 space-y-3" style={{ background: "#242A25", border: "1px solid #37403A" }}>
+        <div className="flex items-center justify-between">
+          <h2 style={{ fontFamily: "'Fraunces', serif", color: "#EDE6D6" }} className="text-lg">
+            Commerces ({shops ? shops.length : 0})
+          </h2>
+          <button onClick={onClose} style={{ color: "#9CA79E" }}><X size={20} /></button>
+        </div>
+        {loadError && <p className="text-xs" style={{ color: "#B5533C" }}>{loadError}</p>}
+        {shops && shops.length === 0 && !loadError && (
+          <p className="text-xs" style={{ color: "#9CA79E" }}>Aucun commerce enregistré pour l'instant.</p>
+        )}
+        <div className="space-y-2">
+          {shops && shops.map((s) => (
+            <button
+              key={s.code}
+              onClick={() => onOpenShop(s.code)}
+              className="w-full p-3 rounded-lg text-left flex items-center justify-between"
+              style={{ background: "#1B1F1C", border: "1px solid #37403A" }}
+            >
+              <span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E", letterSpacing: "0.1em" }} className="block text-sm">{s.code}</span>
+                <span className="text-xs block mt-0.5" style={{ color: "#9CA79E" }}>
+                  {BUSINESS_TYPES[s.businessType]?.label || "Type non défini"}
+                  {s.createdAt ? ` · créé le ${new Date(s.createdAt).toLocaleDateString("fr-FR")}` : ""}
+                </span>
+              </span>
+              <span style={{ color: "#6E8C77" }} className="text-xs">Ouvrir →</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Écran d'accueil ---------- */
+function ShopScreen({ onCreate, onJoin, onDevOpen }) {
   const [mode, setMode] = useState(null); // null | 'join'
   const [code, setCode] = useState("");
+  const [ownerGate, setOwnerGate] = useState(false);
+  const [ownerError, setOwnerError] = useState("");
+  const [devPanel, setDevPanel] = useState(false);
+
+  const handleOwnerPin = (pin) => {
+    if (pin === OWNER_ACCESS_PIN) {
+      setOwnerGate(false);
+      setOwnerError("");
+      onCreate();
+    } else {
+      setOwnerError("Code incorrect.");
+    }
+  };
 
   if (mode === "join") {
     return (
@@ -323,29 +466,43 @@ function ShopScreen({ onCreate, onJoin }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#1B1F1C" }}>
       <div className="w-full max-w-sm space-y-5">
+        <CategoryShowcase />
         <div className="text-center">
           <Logo size={60} />
           <h1 style={{ fontFamily: "'Fraunces', serif", color: "#EDE6D6" }} className="text-2xl">MTE Registre</h1>
           <p className="text-sm mt-1" style={{ color: "#9CA79E" }}>Bienvenue</p>
-          <Copyright className="mt-2" />
         </div>
         <div className="space-y-2">
-          <button onClick={onCreate} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#C08A3E1A", border: "1px solid #C08A3E55", color: "#EDE6D6" }}>
-            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#C08A3E", color: "#1B1F1C" }}><Package size={16} /></span>
-            <span>
-              <span style={{ fontFamily: "'Fraunces', serif" }} className="block">Créer mon commerce</span>
-              <span className="text-xs block mt-0.5" style={{ color: "#9CA79E" }}>Nouveau registre, nouveau code</span>
-            </span>
-          </button>
-          <button onClick={() => setMode("join")} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#242A25", border: "1px solid #37403A", color: "#EDE6D6" }}>
-            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#37403A", color: "#EDE6D6" }}><User size={16} /></span>
+          <button onClick={() => setMode("join")} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#C08A3E1A", border: "1px solid #C08A3E55", color: "#EDE6D6" }}>
+            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#C08A3E", color: "#1B1F1C" }}><User size={16} /></span>
             <span>
               <span style={{ fontFamily: "'Fraunces', serif" }} className="block">Rejoindre un commerce</span>
               <span className="text-xs block mt-0.5" style={{ color: "#9CA79E" }}>J'ai déjà un code</span>
             </span>
           </button>
         </div>
+        <button onClick={() => setOwnerGate(true)} className="w-full text-center text-xs pt-1" style={{ color: "#6E8C77" }}>
+          Espace gérant — créer un commerce
+        </button>
+        <button onClick={() => setDevPanel(true)} className="w-full text-center text-[10px] pt-1" style={{ color: "#37403A" }}>
+          Espace développeur
+        </button>
       </div>
+      {ownerGate && (
+        <PasswordGate
+          title="Mot de passe gérant"
+          subtitle="Ce code t'est réservé, communique-le au commerçant une fois son abonnement confirmé"
+          onSubmit={handleOwnerPin}
+          onCancel={() => { setOwnerGate(false); setOwnerError(""); }}
+          error={ownerError}
+        />
+      )}
+      {devPanel && (
+        <DevPanel
+          onOpenShop={(code) => { setDevPanel(false); onDevOpen(code); }}
+          onClose={() => setDevPanel(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1087,7 +1244,113 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
 }
 
 /* ---------- App ---------- */
-export default function App() {
+/* ---------- Bandeau d'installation PWA ----------
+   S'affiche automatiquement dès l'ouverture du lien, sur n'importe quel écran,
+   pour inciter à installer l'application sur l'écran d'accueil du téléphone.
+   Fonctionne nativement sur Android/Chrome (bouton "Installer"). Sur iPhone,
+   Safari ne permet pas ce déclenchement automatique : on affiche à la place
+   le mode d'emploi manuel (Partager → Sur l'écran d'accueil).
+-------------------------------------------------------------------------- */
+function isIOS() {
+  if (typeof navigator === "undefined") return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+function isStandalone() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function InstallBanner() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [visible, setVisible] = useState(false);
+  const [showIOSHelp, setShowIOSHelp] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (isStandalone()) return; // déjà installée, rien à afficher
+
+    if (isIOS()) {
+      setVisible(true);
+      return;
+    }
+
+    const onPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setVisible(true);
+    };
+    const onInstalled = () => { setVisible(false); setDeferredPrompt(null); };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!visible || dismissed) return;
+    document.body.style.paddingTop = "60px";
+    return () => { document.body.style.paddingTop = ""; };
+  }, [visible, dismissed]);
+
+  if (!visible || dismissed) return null;
+
+  const handleInstallClick = async () => {
+    if (isIOS()) { setShowIOSHelp(true); return; }
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    setDeferredPrompt(null);
+    setVisible(false);
+  };
+
+  return (
+    <>
+      <div
+        className="fixed top-0 left-0 right-0 z-[100] px-4 py-3 flex items-center gap-3"
+        style={{ background: "#C08A3E", color: "#1B1F1C" }}
+      >
+        <Package size={20} className="shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold leading-tight" style={{ fontFamily: "'Fraunces', serif" }}>
+            Installe MTE Registre sur ton téléphone
+          </p>
+          <p className="text-[11px] leading-tight opacity-80">Accès plus rapide, fonctionne même hors connexion</p>
+        </div>
+        <button
+          onClick={handleInstallClick}
+          className="shrink-0 px-3 py-2 rounded-lg text-xs font-semibold"
+          style={{ background: "#1B1F1C", color: "#EDE6D6" }}
+        >
+          Installer
+        </button>
+        <button onClick={() => setDismissed(true)} className="shrink-0" style={{ color: "#1B1F1C" }}>
+          <X size={18} />
+        </button>
+      </div>
+
+      {showIOSHelp && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6" style={{ background: "#00000099" }} onClick={() => setShowIOSHelp(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-6 space-y-3 text-center" style={{ background: "#242A25", border: "1px solid #37403A" }}>
+            <Package size={22} style={{ color: "#C08A3E" }} className="mx-auto" />
+            <h3 style={{ fontFamily: "'Fraunces', serif", color: "#EDE6D6" }} className="text-lg">Installer sur iPhone</h3>
+            <p className="text-sm text-left" style={{ color: "#EDE6D6" }}>
+              1. Appuie sur l'icône <strong>Partager</strong> en bas de Safari (le carré avec la flèche)<br /><br />
+              2. Fais défiler et choisis <strong>"Sur l'écran d'accueil"</strong><br /><br />
+              3. Appuie sur <strong>"Ajouter"</strong> en haut à droite
+            </p>
+            <button onClick={() => setShowIOSHelp(false)} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#C08A3E", color: "#1B1F1C" }}>
+              J'ai compris
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function AppInner() {
   const pendingRef = useRef(new Map());
   const [syncTick, setSyncTick] = useState(0);
   const bumpSync = useCallback(() => setSyncTick((t) => t + 1), []);
@@ -1145,6 +1408,25 @@ export default function App() {
     setNewShopCode(code);
     try { await storage.set("shopId", code, false); } catch (e) {}
   };
+
+  // Ajoute ou met à jour l'entrée d'un commerce dans le registre central
+  // (utilisé par l'espace développeur pour lister tous les commerces).
+  const registerShopInRegistry = useCallback(async (code, type) => {
+    if (!code) return;
+    try {
+      const res = await storage.get(SHOPS_REGISTRY_KEY, true);
+      const list = res ? JSON.parse(res.value) : [];
+      const existing = list.find((s) => s.code === code);
+      const next = existing
+        ? list.map((s) => (s.code === code ? { ...s, businessType: type ?? s.businessType } : s))
+        : [...list, { code, businessType: type ?? null, createdAt: new Date().toISOString() }];
+      await storage.set(SHOPS_REGISTRY_KEY, JSON.stringify(next), true);
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    if (shopId && businessType) registerShopInRegistry(shopId, businessType);
+  }, [shopId, businessType, registerShopInRegistry]);
 
   const joinShop = async (code) => {
     setShopId(code);
@@ -1260,7 +1542,7 @@ export default function App() {
   }
 
   if (!shopId) {
-    return <ShopScreen onCreate={createShop} onJoin={joinShop} />;
+    return <ShopScreen onCreate={createShop} onJoin={joinShop} onDevOpen={joinShop} />;
   }
 
   if (!ready) {
@@ -1343,92 +1625,4 @@ export default function App() {
   return (
     <div className="min-h-screen" style={{ background: "#1B1F1C" }}>
       <style>{`
-        ${fontImport}
-        * { font-family: 'Inter', sans-serif; }
-        body { -webkit-tap-highlight-color: transparent; }
-      `}</style>
-
-      <header className="sticky top-0 z-10 px-4 pt-5 pb-3" style={{ background: "#1B1F1Cee", backdropFilter: "blur(6px)" }}>
-        <div className="max-w-lg mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Logo size={34} />
-            <div>
-              <h1 style={{ fontFamily: "'Fraunces', serif", color: "#EDE6D6" }} className="text-xl leading-tight">MTE Registre</h1>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                <p className="text-xs" style={{ color: "#6E8C77" }}>{BUSINESS_TYPES[businessType].icon} {currentUser.name}</p>
-                {isOpenNow !== null && (
-                  <span className="text-[10px] px-2 py-1 rounded-full" style={{
-                    background: isOpenNow ? "#6E8C771A" : "#B5533C1A",
-                    color: isOpenNow ? "#6E8C77" : "#B5533C",
-                    border: `1px solid ${isOpenNow ? "#6E8C7755" : "#B5533C55"}`,
-                  }}>
-                    {isOpenNow ? `Ouvert · ferme à ${hours.close}` : `Fermé · ouvre à ${hours.open}`}
-                  </span>
-                )}
-                <SyncBadge online={online} pendingCount={pendingRef.current.size} />
-              </div>
-            </div>
-          </div>
-          {tab === "stock" && isAdmin && (
-            <button onClick={() => setModalProduct({})} className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: "#C08A3E", color: "#1B1F1C" }}>
-              <Plus size={20} />
-            </button>
-          )}
-        </div>
-      </header>
-
-      <main className="max-w-lg mx-auto px-4 pb-4">
-        {tab === "stock" && <StockTab products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
-        {tab === "vente" && <VenteTab products={products} cart={cart} setCart={setCart} onValidate={validateSale} />}
-        {tab === "inventaire" && <InventaireTab products={products} isAdmin={isAdmin} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
-        {tab === "historique" && <HistoriqueTab sales={sales} />}
-        {tab === "agenda" && <AgendaTab shifts={shifts} />}
-        {tab === "paie" && <PaieTab sales={sales} sellers={sellers} currentUser={currentUser} isAdmin={isAdmin} />}
-        {tab === "reglages" && (
-          <ReglagesTab
-            businessType={businessType}
-            setBusinessType={setBusinessType}
-            isAdmin={isAdmin}
-            currentUser={currentUser}
-            onLogout={() => setCurrentUser(null)}
-            sellers={sellers}
-            onAddSeller={requestCreateVendeur}
-            onRemoveSeller={removeSeller}
-            onRenameSeller={renameSeller}
-            onUpdateCommission={updateSellerCommission}
-            onReset={resetAll}
-            hours={hours}
-            setHours={setHours}
-            shopId={shopId}
-            onLeaveShop={leaveShop}
-          />
-        )}
-      </main>
-
-      <nav className="fixed bottom-0 left-0 right-0 z-10" style={{ background: "#242A25", borderTop: "1px solid #37403A" }}>
-        <div className="max-w-lg mx-auto grid grid-cols-7">
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)} className="flex flex-col items-center gap-1 py-2.5">
-              <Icon size={17} style={{ color: tab === id ? "#C08A3E" : "#6E8C77" }} />
-              <span className="text-[9px]" style={{ color: tab === id ? "#C08A3E" : "#6E8C77" }}>{label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {modalProduct !== null && (
-        <ProductModal product={modalProduct.id ? modalProduct : null} businessType={businessType} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
-      )}
-
-      {pinPrompt && (
-        <PinPad
-          title={pinPrompt === "create-vendeur" ? `Code pour ${pinTarget?.name}` : "Code gérant"}
-          subtitle={pinPrompt.startsWith("create") ? "4 chiffres, à ne partager qu'avec la bonne personne" : "Entre le code à 4 chiffres"}
-          onSubmit={handlePinSubmit}
-          onCancel={() => setPinPrompt(null)}
-          error={pinError}
-        />
-      )}
-    </div>
-  );
-}
+        ${
