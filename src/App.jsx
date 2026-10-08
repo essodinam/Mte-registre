@@ -8,9 +8,9 @@ import { storage } from "./storage.js";
 
 /* ---------- Design tokens ----------
 Encre  : #F0ECE3 (fond)
-Surface: #582626
+Surface: #FFFFFF
 Laiton : #C08A3E (accent primaire, prix / actions)
-Sauge  : #0b3e5c (accent secondaire, validations)
+Sauge  : #16A34A (accent secondaire, validations)
 Parchemin: #1B1F1C (texte principal)
 Rouille: #DC4C3C (alertes / stock bas)
 Display: 'Fraunces', serif — Mono: 'IBM Plex Mono' — Corps: 'Inter'
