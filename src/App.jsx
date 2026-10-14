@@ -3,7 +3,7 @@
  * Application de gestion de stock et de ventes.
  */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Plus, Minus, Trash2, Package, ShoppingCart, History, Settings, AlertTriangle, X, Check, Lock, LogOut, ClipboardList, WifiOff, RefreshCw, UserPlus, User, Clock, PenTool, Receipt, Wrench, Wine, ShoppingBag, Hammer, Users, Phone, Banknote, Smartphone, CreditCard, Globe, Loader2, ScanLine, Star, CalendarClock, Repeat, Sparkles, Send } from "lucide-react";
+import { Plus, Minus, Trash2, Package, ShoppingCart, History, Settings, AlertTriangle, X, Check, Lock, LogOut, ClipboardList, WifiOff, RefreshCw, UserPlus, User, Clock, PenTool, Receipt, Wrench, Wine, ShoppingBag, Hammer, Users, Phone, Banknote, Smartphone, CreditCard, Globe, Loader2, ScanLine, Star, CalendarClock, Repeat, Sparkles, Send, ArrowLeft, BarChart3 } from "lucide-react";
 import { storage } from "./storage.js";
 
 /* ---------- Design tokens ----------
@@ -13,7 +13,7 @@ Laiton : #C08A3E (accent primaire, prix / actions)
 Sauge  : #16A34A (accent secondaire, validations)
 Parchemin: #1B1F1C (texte principal)
 Rouille: #DC4C3C (alertes / stock bas)
-Display: 'Fraunces', serif — Mono: 'IBM Plex Mono' — Corps: 'Inter'
+Police unique : 'Carlito', sans-serif (titres, texte, chiffres)
 Signature : le "registre" — chaque ligne ressemble à une ligne de grand livre,
 avec reliure cousue sur le bord gauche.
 ------------------------------------ */
@@ -46,11 +46,89 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "2.5";
+const APP_VERSION = "3.3";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+// Durée en "Xh Ymin", utilisée pour afficher le temps de service travaillé.
+const formatDuration = (ms) => {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${m > 0 ? ` ${m}min` : ""}` : `${m}min`;
+};
+
+// Distance en mètres entre deux points GPS (formule de Haversine), utilisée pour
+// vérifier qu'une prise de service se fait bien sur place et pas à distance.
+const SHOP_RADIUS_METERS = 300;
+const distanceMeters = (a, b) => {
+  if (!a || !b) return null;
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
+};
+const getCurrentPosition = () => new Promise((resolve, reject) => {
+  if (!navigator.geolocation) { reject(new Error("Géolocalisation non supportée")); return; }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    (err) => reject(err),
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+});
+
+// ---------- Empreinte digitale (connexion rapide par appareil, via WebAuthn) ----------
+// Le navigateur ne renvoie une "assertion" réussie que si le capteur biométrique
+// (empreinte, Face ID) de CET appareil a confirmé l'identité. On n'a pas de serveur
+// pour vérifier la signature cryptographique, mais c'est sans importance pour ce
+// cas d'usage : sans le doigt/visage déjà enregistré sur ce téléphone précis, la
+// promesse n'aboutit jamais. L'identifiant d'identifiant (credential) reste
+// strictement local à l'appareil (stockage non partagé).
+const BIOMETRIC_SUPPORTED =
+  typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials;
+
+function b64encode(buf) {
+  let str = "";
+  new Uint8Array(buf).forEach((b) => { str += String.fromCharCode(b); });
+  return btoa(str);
+}
+function b64decode(str) {
+  return Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+}
+
+async function registerBiometric(userKey, userName) {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const userId = crypto.getRandomValues(new Uint8Array(16));
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: { name: "Wuri" },
+      user: { id: userId, name: userKey, displayName: userName || userKey },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+      timeout: 60000,
+      attestation: "none",
+    },
+  });
+  if (!cred) throw new Error("Échec de l'enregistrement");
+  return b64encode(cred.rawId);
+}
+
+async function verifyBiometric(credentialId) {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      allowCredentials: [{ id: b64decode(credentialId), type: "public-key" }],
+      userVerification: "required",
+      timeout: 60000,
+    },
+  });
+  return !!assertion;
+}
 // Met un numéro togolais (ou autre) au format attendu par wa.me (indicatif sans +, sans espaces).
 const waPhone = (phone) => {
   let p = (phone || "").replace(/[^\d+]/g, "");
@@ -112,7 +190,7 @@ function Logo({ size = 40 }) {
       <text
         x="120" y="165"
         textAnchor="middle"
-        fontFamily="Georgia, 'Fraunces', serif"
+        fontFamily="Georgia, 'Carlito', sans-serif"
         fontWeight="700"
         fontSize="138"
         fill="#F0ECE3"
@@ -197,7 +275,7 @@ function Ledger({ children }) {
 function Row({ n, children }) {
   return (
     <div className="flex items-center gap-3 py-3 pr-3 border-b last:border-b-0" style={{ borderColor: "#DCD5C622" }}>
-      <span className="text-xs w-6 text-right shrink-0" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#16A34A" }}>
+      <span className="text-xs w-6 text-right shrink-0" style={{ fontFamily: "'Carlito', sans-serif", color: "#16A34A" }}>
         {String(n).padStart(2, "0")}
       </span>
       {children}
@@ -233,7 +311,7 @@ function PinPad({ title, subtitle, onSubmit, onCancel, error }) {
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-6 space-y-4 text-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <Lock size={22} style={{ color: "#1B1F1C" }} className="mx-auto" />
         <div>
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">{title}</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">{title}</h3>
           {subtitle && <p className="text-xs mt-1" style={{ color: "#6B6558" }}>{subtitle}</p>}
         </div>
         <div className="flex justify-center gap-3">
@@ -269,7 +347,7 @@ function PasswordGate({ title, subtitle, onSubmit, onCancel, error }) {
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-6 space-y-4 text-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <Lock size={22} style={{ color: "#1B1F1C" }} className="mx-auto" />
         <div>
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">{title}</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">{title}</h3>
           {subtitle && <p className="text-xs mt-1" style={{ color: "#6B6558" }}>{subtitle}</p>}
         </div>
         <input
@@ -279,7 +357,7 @@ function PasswordGate({ title, subtitle, onSubmit, onCancel, error }) {
           onKeyDown={(e) => { if (e.key === "Enter" && value) onSubmit(value); }}
           autoFocus
           className="w-full px-4 py-3 rounded-lg text-center outline-none text-lg"
-          style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+          style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
         />
         {error && <p className="text-xs" style={{ color: "#DC4C3C" }}>{error}</p>}
         <button
@@ -295,10 +373,11 @@ function PasswordGate({ title, subtitle, onSubmit, onCancel, error }) {
     </div>
   );
 }
-function SignaturePad({ name, onSign, onCancel }) {
+function SignaturePad({ name, onSign, onCancel, title = "Signature de prise de service", confirmLabel = "Signer et commencer" }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const [empty, setEmpty] = useState(true);
+  const [confirming, setConfirming] = useState(false);
 
   const pos = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -328,9 +407,14 @@ function SignaturePad({ name, onSign, onCancel }) {
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     setEmpty(true);
   };
-  const confirm = () => {
-    if (empty) return;
-    onSign(canvasRef.current.toDataURL("image/png"));
+  const confirm = async () => {
+    if (empty || confirming) return;
+    setConfirming(true);
+    try {
+      await onSign(canvasRef.current.toDataURL("image/png"));
+    } finally {
+      setConfirming(false);
+    }
   };
 
   return (
@@ -338,7 +422,7 @@ function SignaturePad({ name, onSign, onCancel }) {
       <div className="w-full max-w-sm rounded-2xl p-5 space-y-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <div className="text-center">
           <PenTool size={20} style={{ color: "#C08A3E" }} className="mx-auto" />
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg mt-1">Signature de prise de service</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg mt-1">{title}</h3>
           <p className="text-xs mt-1" style={{ color: "#6B6558" }}>{name} — {new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
         </div>
         <canvas
@@ -353,14 +437,14 @@ function SignaturePad({ name, onSign, onCancel }) {
           onPointerLeave={end}
         />
         <div className="flex gap-2">
-          <button onClick={clear} className="px-4 py-2.5 rounded-lg text-sm" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>Effacer</button>
+          <button onClick={clear} disabled={confirming} className="px-4 py-2.5 rounded-lg text-sm disabled:opacity-40" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>Effacer</button>
           <button
-            disabled={empty}
+            disabled={empty || confirming}
             onClick={confirm}
-            className="flex-1 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
+            className="flex-1 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
             style={{ background: "#C08A3E", color: "#F0ECE3" }}
           >
-            Signer et commencer
+            {confirming ? (<><Loader2 size={15} className="animate-spin" /> Vérification…</>) : confirmLabel}
           </button>
         </div>
         <button onClick={onCancel} className="w-full text-xs" style={{ color: "#6B6558" }}>Annuler</button>
@@ -402,7 +486,7 @@ function CategoryShowcase() {
           />
           <span
             className="absolute bottom-0 left-0 right-0 text-[11px] text-center px-2 py-2 leading-tight"
-            style={{ color: "#F0ECE3", fontFamily: "'Fraunces', serif" }}
+            style={{ color: "#F0ECE3", fontFamily: "'Carlito', sans-serif" }}
           >
             {label}
           </span>
@@ -516,7 +600,7 @@ function DevPanel({ onOpenShop, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#1B1F1Ccc" }}>
       <div className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-lg p-5 space-y-3" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <div className="flex items-center justify-between">
-          <h2 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">
+          <h2 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">
             Commerces ({shops ? shops.length : 0})
           </h2>
           <button onClick={onClose} style={{ color: "#6B6558" }}><X size={20} /></button>
@@ -583,7 +667,7 @@ function DevPanel({ onOpenShop, onClose }) {
               <div key={s.code} className="rounded-lg p-3" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
                 <div className="flex items-center justify-between">
                   <button onClick={() => onOpenShop(s.code)} className="text-left flex-1">
-                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E", letterSpacing: "0.1em" }} className="block text-sm">{s.code}</span>
+                    <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E", letterSpacing: "0.1em" }} className="block text-sm">{s.code}</span>
                     <span className="text-xs block mt-0.5" style={{ color: "#6B6558" }}>
                       {BUSINESS_TYPES[s.businessType]?.label || "Type non défini"}
                       {s.createdAt ? ` · créé le ${new Date(s.createdAt).toLocaleDateString("fr-FR")}` : ""}
@@ -658,7 +742,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={56} />
-            <h1 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Code de ton commerce</p>
           </div>
           <input
@@ -666,7 +750,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="Ex : AB12-CD34"
             className="w-full px-4 py-3 rounded-lg text-center outline-none text-lg tracking-widest"
-            style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+            style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
           />
           <button
             disabled={!code.trim()}
@@ -688,7 +772,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
         <CategoryShowcase />
         <div className="text-center">
           <Logo size={60} />
-          <h1 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Bienvenue</p>
         </div>
         {knownShops && knownShops.length > 0 && (
@@ -703,7 +787,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
                   style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
                 >
                   <span className="flex items-center gap-2"><Repeat size={13} style={{ color: "#C08A3E" }} /> {s.label || s.code}</span>
-                  <span className="text-xs" style={{ color: "#6B6558", fontFamily: "'IBM Plex Mono', monospace" }}>{s.code}</span>
+                  <span className="text-xs" style={{ color: "#6B6558", fontFamily: "'Carlito', sans-serif" }}>{s.code}</span>
                 </button>
               ))}
             </div>
@@ -713,7 +797,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
           <button onClick={() => setMode("join")} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#C08A3E1A", border: "1px solid #C08A3E55", color: "#1B1F1C" }}>
             <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#1B1F1C", color: "#F0ECE3" }}><User size={16} /></span>
             <span>
-              <span style={{ fontFamily: "'Fraunces', serif" }} className="block">Rejoindre un commerce</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif" }} className="block">Rejoindre un commerce</span>
               <span className="text-xs block mt-0.5" style={{ color: "#6B6558" }}>J'ai déjà un code</span>
             </span>
           </button>
@@ -763,10 +847,10 @@ function ShopCodeReveal({ code, onContinue }) {
       <div className="w-full max-w-sm rounded-2xl p-6 space-y-4 text-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <Package size={22} style={{ color: "#1B1F1C" }} className="mx-auto" />
         <div>
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Ton commerce est créé</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Ton commerce est créé</h3>
           <p className="text-xs mt-1" style={{ color: "#6B6558" }}>Note ce code : il te servira à connecter tes autres appareils et employés à ce même registre.</p>
         </div>
-        <div className="py-3 rounded-lg text-xl tracking-[0.3em]" style={{ background: "#F0ECE3", border: "1px solid #C08A3E55", color: "#8A6A2E", fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div className="py-3 rounded-lg text-xl tracking-[0.3em]" style={{ background: "#F0ECE3", border: "1px solid #C08A3E55", color: "#8A6A2E", fontFamily: "'Carlito', sans-serif" }}>
           {code}
         </div>
         <p className="text-[10px]" style={{ color: "#8A6A2E" }}>Tu pourras le retrouver plus tard dans Réglages.</p>
@@ -778,44 +862,52 @@ function ShopCodeReveal({ code, onContinue }) {
   );
 }
 
-function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCaissier }) {
+function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCaissier, biometricCreds, onBack }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
       <div className="w-full max-w-sm space-y-5">
+        {onBack && (
+          <button onClick={onBack} className="flex items-center gap-1.5 text-sm" style={{ color: "#6B6558" }}>
+            <ArrowLeft size={16} /> Retour
+          </button>
+        )}
         <div className="text-center">
           <Logo size={56} />
-          <h1 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Qui utilise l'application ?</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={onPickGerant}
-            className="aspect-square rounded-xl flex flex-col items-center justify-center gap-2 p-3 text-center"
+            className="relative aspect-square rounded-xl flex flex-col items-center justify-center gap-2 p-3 text-center"
             style={{ background: "#C08A3E1A", border: "2px solid #C08A3E", color: "#1B1F1C" }}
           >
+            {biometricCreds?.["gerant"] && <ScanLine size={13} className="absolute top-2 right-2" style={{ color: "#C08A3E" }} />}
             <Lock size={22} style={{ color: "#8A6A2E" }} />
-            <span style={{ fontFamily: "'Fraunces', serif" }} className="text-sm font-semibold">Gérant</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif" }} className="text-sm font-semibold">Gérant</span>
           </button>
           {sellers.map((s) => (
             <button
               key={s.id}
               onClick={() => onPickVendeur(s)}
-              className="aspect-square rounded-xl flex flex-col items-center justify-center gap-2 p-3 text-center"
+              className="relative aspect-square rounded-xl flex flex-col items-center justify-center gap-2 p-3 text-center"
               style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
             >
+              {biometricCreds?.[`vendeur:${s.id}`] && <ScanLine size={13} className="absolute top-2 right-2" style={{ color: "#C08A3E" }} />}
               <User size={22} style={{ color: "#6B6558" }} />
-              <span style={{ fontFamily: "'Fraunces', serif" }} className="text-sm font-semibold">{s.name}</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif" }} className="text-sm font-semibold">{s.name}</span>
             </button>
           ))}
           {cashiers.map((c) => (
             <button
               key={c.id}
               onClick={() => onPickCaissier(c)}
-              className="aspect-square rounded-xl flex flex-col items-center justify-center gap-2 p-3 text-center"
+              className="relative aspect-square rounded-xl flex flex-col items-center justify-center gap-2 p-3 text-center"
               style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
             >
+              {biometricCreds?.[`caissier:${c.id}`] && <ScanLine size={13} className="absolute top-2 right-2" style={{ color: "#C08A3E" }} />}
               <Receipt size={22} style={{ color: "#6B6558" }} />
-              <span style={{ fontFamily: "'Fraunces', serif" }} className="text-sm font-semibold">{c.name}</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif" }} className="text-sm font-semibold">{c.name}</span>
               <span className="text-[10px] -mt-1.5" style={{ color: "#8A6A2E" }}>Caissier</span>
             </button>
           ))}
@@ -888,18 +980,23 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant }) {
           filtered.map((p, i) => (
             <Row key={p.id} n={i + 1}>
               <button onClick={() => isAdmin && onOpenProduct(p)} className="flex-1 flex items-center justify-between text-left">
-                <div>
-                  <div style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }} className="text-[15px] flex items-center gap-1.5">
-                    {p.name}
-                    {p.hasCodes && <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#C08A3E22", color: "#C08A3E" }}>🔑 codes</span>}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-md overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+                    {p.photoUrl ? <img src={p.photoUrl} alt="" className="w-full h-full object-cover" /> : <Package size={15} style={{ color: "#DCD5C6" }} />}
                   </div>
-                  <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.category}</div>
+                  <div className="min-w-0">
+                    <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px] flex items-center gap-1.5">
+                      {p.name}
+                      {p.hasCodes && <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#C08A3E22", color: "#C08A3E" }}>🔑 codes</span>}
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.category}</div>
+                  </div>
                 </div>
                 <div className="text-right">
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", color: p.stock <= p.threshold ? "#DC4C3C" : "#1B1F1C" }} className="text-sm">
+                  <div style={{ fontFamily: "'Carlito', sans-serif", color: p.stock <= p.threshold ? "#DC4C3C" : "#1B1F1C" }} className="text-sm">
                     {p.stock} {p.unit}
                   </div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }} className="text-xs mt-0.5">
+                  <div style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-xs mt-0.5">
                     {fmt(p.price)} FCFA
                   </div>
                 </div>
@@ -918,17 +1015,43 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant }) {
   );
 }
 
-function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
+function ProductModal({ product, businessType, shopId, onSave, onDelete, onClose }) {
   const isNew = !product?.id;
   const [form, setForm] = useState(
     product || { id: uid(), name: "", category: BUSINESS_TYPES[businessType].categories[0], price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
   );
   const [newCodesText, setNewCodesText] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const codes = form.codes || [];
   const unusedCount = codes.filter((c) => !c.used).length;
   const usedCount = codes.length - unusedCount;
   const valid = form.name.trim() && form.price !== "" && (form.hasCodes ? true : form.stock !== "");
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoError("");
+    setPhotoUploading(true);
+    try {
+      const url = await storage.uploadProductPhoto(file, shopId, form.id);
+      const oldUrl = form.photoUrl;
+      set("photoUrl", url);
+      if (oldUrl && oldUrl !== url) storage.deleteProductPhoto(oldUrl);
+    } catch (err) {
+      setPhotoError("Envoi de la photo impossible. Vérifie ta connexion et réessaie.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const removePhoto = () => {
+    const oldUrl = form.photoUrl;
+    set("photoUrl", null);
+    if (oldUrl) storage.deleteProductPhoto(oldUrl);
+  };
 
   const addCodes = () => {
     const existing = new Set(codes.map((c) => c.code));
@@ -946,7 +1069,7 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "#00000088" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 space-y-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <div className="flex items-center justify-between">
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">{isNew ? "Nouvel article" : "Modifier l'article"}</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">{isNew ? "Nouvel article" : "Modifier l'article"}</h3>
           <button onClick={onClose}><X size={20} style={{ color: "#6B6558" }} /></button>
         </div>
 
@@ -954,6 +1077,30 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
           <div>
             <label className="text-xs" style={{ color: "#6B6558" }}>Nom</label>
             <input value={form.name} onChange={(e) => set("name", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} placeholder="Ex : Vis 4x40, Planche chêne…" />
+          </div>
+
+          <div>
+            <label className="text-xs" style={{ color: "#6B6558" }}>Photo (optionnel)</label>
+            <div className="flex items-center gap-3 mt-1">
+              <div className="w-16 h-16 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+                {form.photoUrl ? (
+                  <img src={form.photoUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <Package size={22} style={{ color: "#DCD5C6" }} />
+                )}
+              </div>
+              <div className="flex-1 space-y-1.5">
+                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs cursor-pointer" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#C08A3E" }}>
+                  {photoUploading ? <Loader2 size={13} className="animate-spin" /> : <Package size={13} />}
+                  {photoUploading ? "Envoi en cours…" : form.photoUrl ? "Changer la photo" : "Ajouter une photo"}
+                  <input type="file" accept="image/*" capture="environment" onChange={handlePhotoChange} disabled={photoUploading} className="hidden" />
+                </label>
+                {form.photoUrl && !photoUploading && (
+                  <button onClick={removePhoto} className="block text-xs" style={{ color: "#DC4C3C" }}>Retirer la photo</button>
+                )}
+                {photoError && <p className="text-xs" style={{ color: "#DC4C3C" }}>{photoError}</p>}
+              </div>
+            </div>
           </div>
 
           <div>
@@ -966,11 +1113,11 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "#6B6558" }}>Prix de vente (FCFA)</label>
-              <input type="number" value={form.price} onChange={(e) => set("price", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+              <input type="number" value={form.price} onChange={(e) => set("price", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
             </div>
             <div>
               <label className="text-xs" style={{ color: "#6B6558" }}>Prix d'achat (optionnel)</label>
-              <input type="number" value={form.costPrice ?? ""} onChange={(e) => set("costPrice", e.target.value)} placeholder="Pour calculer la marge" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+              <input type="number" value={form.costPrice ?? ""} onChange={(e) => set("costPrice", e.target.value)} placeholder="Pour calculer la marge" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
             </div>
           </div>
 
@@ -981,13 +1128,13 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
             </div>
             <div>
               <label className="text-xs" style={{ color: "#6B6558" }}>Code-barres (optionnel)</label>
-              <input value={form.barcode || ""} onChange={(e) => set("barcode", e.target.value)} placeholder="Pour le scan" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+              <input value={form.barcode || ""} onChange={(e) => set("barcode", e.target.value)} placeholder="Pour le scan" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
             </div>
           </div>
 
           <div>
             <label className="text-xs" style={{ color: "#6B6558" }}>Date de péremption (optionnel)</label>
-            <input type="date" value={form.expiryDate || ""} onChange={(e) => set("expiryDate", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+            <input type="date" value={form.expiryDate || ""} onChange={(e) => set("expiryDate", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
           </div>
 
           <label className="flex items-center gap-2.5 py-1 cursor-pointer select-none">
@@ -1007,7 +1154,7 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
             <div className="space-y-2">
               <div className="rounded-lg p-3 flex items-center justify-between text-sm" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
                 <span style={{ color: "#6B6558" }}>Codes disponibles</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: unusedCount === 0 ? "#DC4C3C" : "#16A34A" }}>{unusedCount} dispo · {usedCount} vendus</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif", color: unusedCount === 0 ? "#DC4C3C" : "#16A34A" }}>{unusedCount} dispo · {usedCount} vendus</span>
               </div>
               <div>
                 <label className="text-xs" style={{ color: "#6B6558" }}>Ajouter des codes (un par ligne)</label>
@@ -1017,7 +1164,7 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
                   placeholder={"EX : WIFI-A1B2\nWIFI-C3D4\nWIFI-E5F6"}
                   rows={4}
                   className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none"
-                  style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                  style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
                 />
                 <button
                   onClick={addCodes}
@@ -1030,18 +1177,18 @@ function ProductModal({ product, businessType, onSave, onDelete, onClose }) {
               </div>
               <div>
                 <label className="text-xs" style={{ color: "#6B6558" }}>Seuil d'alerte (codes restants)</label>
-                <input type="number" value={form.threshold} onChange={(e) => set("threshold", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+                <input type="number" value={form.threshold} onChange={(e) => set("threshold", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
               </div>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs" style={{ color: "#6B6558" }}>Quantité en stock</label>
-                <input type="number" value={form.stock} onChange={(e) => set("stock", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+                <input type="number" value={form.stock} onChange={(e) => set("stock", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
               </div>
               <div>
                 <label className="text-xs" style={{ color: "#6B6558" }}>Seuil d'alerte</label>
-                <input type="number" value={form.threshold} onChange={(e) => set("threshold", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+                <input type="number" value={form.threshold} onChange={(e) => set("threshold", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
               </div>
             </div>
           )}
@@ -1100,10 +1247,10 @@ function ReceiptModal({ receipt, onClose, format = "58mm" }) {
       <div
         onClick={(e) => e.stopPropagation()}
         className="mte-receipt w-full max-w-xs rounded-xl p-5 space-y-3"
-        style={{ background: "#EDE6D6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+        style={{ background: "#EDE6D6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
       >
         <div className="text-center space-y-0.5">
-          <p className="text-base font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{shopName || "Mon commerce"}</p>
+          <p className="text-base font-semibold" style={{ fontFamily: "'Carlito', sans-serif" }}>{shopName || "Mon commerce"}</p>
           <p className="text-[11px]">{businessTypeLabel}</p>
         </div>
         <div className="border-t border-dashed pt-2 text-[11px] flex items-center justify-between" style={{ borderColor: "#1B1F1C55" }}>
@@ -1195,7 +1342,7 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6" style={{ background: "#00000099" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl p-5 space-y-4" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between">
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Fiche client</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Fiche client</h3>
           <button onClick={onClose}><X size={18} style={{ color: "#6B6558" }} /></button>
         </div>
 
@@ -1208,27 +1355,27 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
           </div>
         ) : (
           <div>
-            <p style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-base">{client.name}</p>
+            <p style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-base">{client.name}</p>
             {client.phone && <p className="text-sm mt-0.5 flex items-center gap-1.5" style={{ color: "#6B6558" }}><Phone size={12} /> {client.phone}</p>}
           </div>
         )}
 
         <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#C08A3E1A" }}>
           <span className="text-sm" style={{ color: "#1B1F1C" }}>Total dépensé</span>
-          <span style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-lg">{fmt(totalSpent)} FCFA</span>
+          <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-lg">{fmt(totalSpent)} FCFA</span>
         </div>
 
         {loyaltyRate > 0 && (
           <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#16A34A1A" }}>
             <span className="text-sm" style={{ color: "#1B1F1C" }}>Points de fidélité</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#16A34A" }} className="text-lg">{points} pt{points > 1 ? "s" : ""}</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: "#16A34A" }} className="text-lg">{points} pt{points > 1 ? "s" : ""}</span>
           </div>
         )}
 
         <div className="rounded-lg p-3 space-y-2" style={{ background: debt > 0 ? "#DC4C3C1A" : "#F0ECE3", border: `1px solid ${debt > 0 ? "#DC4C3C55" : "#DCD5C6"}` }}>
           <div className="flex items-center justify-between">
             <span className="text-sm" style={{ color: "#1B1F1C" }}>Dette (vente à crédit)</span>
-            <span style={{ fontFamily: "'Fraunces', serif", color: debt > 0 ? "#DC4C3C" : "#6B6558" }} className="text-lg">{fmt(debt)} FCFA</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: debt > 0 ? "#DC4C3C" : "#6B6558" }} className="text-lg">{fmt(debt)} FCFA</span>
           </div>
           {isAdmin && debt > 0 && (
             <div className="flex gap-2">
@@ -1238,7 +1385,7 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
                 onChange={(e) => setRepayAmount(e.target.value)}
                 placeholder="Montant remboursé"
                 className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
-                style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
               />
               <button onClick={repay} disabled={!repayAmount} className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-40" style={{ background: "#16A34A", color: "#FFFFFF" }}>
                 Enregistrer
@@ -1251,7 +1398,7 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
           <div className="flex items-center justify-between">
             <span className="text-sm flex items-center gap-1.5" style={{ color: "#1B1F1C" }}><Star size={14} style={{ color: "#C08A3E" }} /> Avis / satisfaction</span>
             {reviews.length > 0 && (
-              <span className="text-sm" style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }}>{avgRating.toFixed(1)} / 5 ({reviews.length})</span>
+              <span className="text-sm" style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }}>{avgRating.toFixed(1)} / 5 ({reviews.length})</span>
             )}
           </div>
           {isAdmin && (
@@ -1291,7 +1438,7 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
               <div key={s.id} className="p-2.5 rounded-lg text-sm" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
                 <div className="flex items-center justify-between">
                   <span style={{ color: "#1B1F1C" }}>{new Date(s.date).toLocaleDateString("fr-FR")}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }}>{fmt(s.total)} FCFA</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }}>{fmt(s.total)} FCFA</span>
                 </div>
                 <p className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{s.items.map((i) => `${i.name} ×${i.qty}`).join(", ")}</p>
                 {s.paymentMethod && <p className="text-[10px] mt-0.5" style={{ color: s.paymentMethod === "credit" ? "#DC4C3C" : "#16A34A" }}>{paymentLabel(s.paymentMethod)}</p>}
@@ -1374,13 +1521,13 @@ function ClientsTab({ clients, sales, isAdmin, onAddClient, onUpdateClient, onRe
             <Row key={c.id} n={i + 1}>
               <button onClick={() => setOpenClient(c)} className="flex-1 flex items-center justify-between text-left">
                 <div>
-                  <div style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }} className="text-[15px]">{c.name}</div>
+                  <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px]">{c.name}</div>
                   {c.phone && <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{c.phone}</div>}
                   {c.creditBalance > 0 && (
                     <div className="text-[10px] mt-0.5 font-semibold" style={{ color: "#DC4C3C" }}>Doit {fmt(c.creditBalance)} FCFA</div>
                   )}
                 </div>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }} className="text-sm">{fmt(spentByClient[c.id] || 0)} FCFA</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-sm">{fmt(spentByClient[c.id] || 0)} FCFA</span>
               </button>
             </Row>
           ))
@@ -1461,7 +1608,7 @@ function BarcodeScannerModal({ onDetect, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#000000dd" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-xl p-5 space-y-3" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between">
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg flex items-center gap-2"><ScanLine size={18} style={{ color: "#C08A3E" }} /> Scanner un code-barres</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg flex items-center gap-2"><ScanLine size={18} style={{ color: "#C08A3E" }} /> Scanner un code-barres</h3>
           <button onClick={onClose}><X size={18} style={{ color: "#6B6558" }} /></button>
         </div>
 
@@ -1636,12 +1783,17 @@ function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, f
           visibleProducts.map((p, i) => (
             <Row key={p.id} n={i + 1}>
               <button onClick={() => add(p)} disabled={p.stock === 0} className="flex-1 flex items-center justify-between text-left disabled:opacity-30">
-                <div>
-                  <div style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }} className="text-[15px]">{p.name}</div>
-                  <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.stock} {p.unit} dispo</div>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-md overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+                    {p.photoUrl ? <img src={p.photoUrl} alt="" className="w-full h-full object-cover" /> : <Package size={15} style={{ color: "#DCD5C6" }} />}
+                  </div>
+                  <div className="min-w-0">
+                    <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px]">{p.name}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.stock} {p.unit} dispo</div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }} className="text-sm">{fmt(p.price)} FCFA</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-sm">{fmt(p.price)} FCFA</span>
                   <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "#C08A3E22", color: "#C08A3E" }}><Plus size={14} /></span>
                 </div>
               </button>
@@ -1658,7 +1810,7 @@ function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, f
                 <span style={{ color: "#1B1F1C" }}>{i.name}</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => dec(i.id)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "#DCD5C6", color: "#1B1F1C" }}><Minus size={12} /></button>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#1B1F1C" }} className="w-5 text-center">{i.qty}</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="w-5 text-center">{i.qty}</span>
                   <button onClick={() => inc(i.id)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "#DCD5C6", color: "#1B1F1C" }}><Plus size={12} /></button>
                 </div>
               </div>
@@ -1704,7 +1856,7 @@ function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, f
 
             <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: "#DCD5C6" }}>
               <span style={{ color: "#6B6558" }} className="text-sm">Total</span>
-              <span style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-xl">{fmt(total)} FCFA</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-xl">{fmt(total)} FCFA</span>
             </div>
             <button
               onClick={handleValidate}
@@ -1722,7 +1874,7 @@ function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, f
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6" style={{ background: "#00000099" }} onClick={() => setPickerOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm max-h-[80vh] overflow-y-auto rounded-t-2xl md:rounded-2xl p-5 space-y-3" style={{ background: "#FFFFFF" }}>
             <div className="flex items-center justify-between">
-              <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Choisir un client</h3>
+              <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Choisir un client</h3>
               <button onClick={() => setPickerOpen(false)}><X size={18} style={{ color: "#6B6558" }} /></button>
             </div>
             <button
@@ -1821,7 +1973,7 @@ function InventaireTab({ products: allProducts, isAdmin, onRequestGerant, onVali
           <Row key={p.id} n={i + 1}>
             <div className="flex-1 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }} className="text-[15px] truncate">{p.name}</div>
+                <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px] truncate">{p.name}</div>
                 <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>Enregistré : {p.stock} {p.unit}</div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1830,10 +1982,10 @@ function InventaireTab({ products: allProducts, isAdmin, onRequestGerant, onVali
                   value={counts[p.id] ?? ""}
                   onChange={(e) => setCounts((c) => ({ ...c, [p.id]: e.target.value }))}
                   className="w-16 px-2 py-1.5 rounded-md text-sm text-right outline-none"
-                  style={{ background: "#F0ECE3", border: `1px solid ${p.diff !== 0 ? "#C08A3E" : "#DCD5C6"}`, color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                  style={{ background: "#F0ECE3", border: `1px solid ${p.diff !== 0 ? "#C08A3E" : "#DCD5C6"}`, color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
                 />
                 {p.diff !== 0 && (
-                  <span className="text-xs w-10 text-right" style={{ fontFamily: "'IBM Plex Mono', monospace", color: p.diff > 0 ? "#16A34A" : "#DC4C3C" }}>
+                  <span className="text-xs w-10 text-right" style={{ fontFamily: "'Carlito', sans-serif", color: p.diff > 0 ? "#16A34A" : "#DC4C3C" }}>
                     {p.diff > 0 ? "+" : ""}{p.diff}
                   </span>
                 )}
@@ -1918,7 +2070,7 @@ function HistoriqueTab({ sales }) {
           <div key={day}>
             <div className="flex items-center justify-between mb-2 px-1">
               <span className="text-xs uppercase tracking-wide" style={{ color: "#16A34A" }}>{day}</span>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }} className="text-xs">{fmt(dayTotal)} FCFA</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-xs">{fmt(dayTotal)} FCFA</span>
             </div>
             <Ledger>
               {list.map((s, i) => (
@@ -1928,12 +2080,12 @@ function HistoriqueTab({ sales }) {
                       <div style={{ color: "#1B1F1C" }} className="text-sm">{s.items.map((it) => `${it.qty}× ${it.name}`).join(", ")}</div>
                       <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{new Date(s.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} · {s.sellerName} · {paymentLabel(s.paymentMethod)}</div>
                       {s.items.some((it) => it.codes && it.codes.length > 0) && (
-                        <div className="text-[11px] mt-0.5" style={{ color: "#C08A3E", fontFamily: "'IBM Plex Mono', monospace" }}>
+                        <div className="text-[11px] mt-0.5" style={{ color: "#C08A3E", fontFamily: "'Carlito', sans-serif" }}>
                           {s.items.filter((it) => it.codes && it.codes.length).map((it) => it.codes.join(", ")).join(" · ")}
                         </div>
                       )}
                     </div>
-                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#1B1F1C" }} className="text-sm">{fmt(s.total)} FCFA</span>
+                    <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-sm">{fmt(s.total)} FCFA</span>
                   </div>
                 </Row>
               ))}
@@ -1941,6 +2093,166 @@ function HistoriqueTab({ sales }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ---------- Tableau de bord (ventes & meilleurs articles) ---------- */
+function DashboardTab({ sales, products }) {
+  const [selectedDay, setSelectedDay] = useState(null);
+  const DAYS = 14;
+
+  const dailyData = useMemo(() => {
+    const days = [];
+    const base = new Date();
+    base.setHours(0, 0, 0, 0);
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = new Date(base);
+      d.setDate(d.getDate() - i);
+      days.push({ date: d, total: 0, count: 0 });
+    }
+    sales.forEach((sale) => {
+      const d = new Date(sale.date);
+      d.setHours(0, 0, 0, 0);
+      const t = d.getTime();
+      const match = days.find((day) => day.date.getTime() === t);
+      if (match) { match.total += sale.total; match.count += 1; }
+    });
+    return days;
+  }, [sales]);
+
+  const maxDaily = Math.max(1, ...dailyData.map((d) => d.total));
+  const totalPeriod = dailyData.reduce((s, d) => s + d.total, 0);
+  const avgDaily = totalPeriod / DAYS;
+  const bestDay = dailyData.reduce((best, d) => (!best || d.total > best.total ? d : best), null);
+
+  const topProducts = useMemo(() => {
+    const since = dailyData[0]?.date?.getTime() ?? 0;
+    const map = {};
+    sales.forEach((sale) => {
+      if (sale.date < since) return;
+      (sale.items || []).forEach((it) => {
+        map[it.name] = (map[it.name] || 0) + it.price * it.qty;
+      });
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [sales, dailyData]);
+  const maxProduct = Math.max(1, ...topProducts.map(([, v]) => v));
+
+  const byPayment = useMemo(() => {
+    const since = dailyData[0]?.date?.getTime() ?? 0;
+    const map = {};
+    sales.forEach((sale) => {
+      if (sale.date < since) return;
+      const key = sale.paymentMethod || "especes";
+      map[key] = (map[key] || 0) + sale.total;
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }, [sales, dailyData]);
+  const maxPayment = Math.max(1, ...byPayment.map(([, v]) => v));
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg p-3" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+          <div className="text-[11px]" style={{ color: "#6B6558" }}>Total sur {DAYS} jours</div>
+          <div style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg mt-0.5">{fmt(totalPeriod)} <span className="text-xs" style={{ color: "#6B6558" }}>FCFA</span></div>
+        </div>
+        <div className="rounded-lg p-3" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+          <div className="text-[11px]" style={{ color: "#6B6558" }}>Moyenne par jour</div>
+          <div style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg mt-0.5">{fmt(Math.round(avgDaily))} <span className="text-xs" style={{ color: "#6B6558" }}>FCFA</span></div>
+        </div>
+      </div>
+
+      <div className="rounded-lg p-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs uppercase tracking-wide" style={{ color: "#16A34A" }}>Ventes des {DAYS} derniers jours</span>
+          {bestDay && bestDay.total > 0 && (
+            <span className="text-[10px]" style={{ color: "#6B6558" }}>Meilleur jour : {bestDay.date.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" })}</span>
+          )}
+        </div>
+        <div className="flex items-end gap-1" style={{ height: 110 }}>
+          {dailyData.map((d, i) => {
+            const h = d.total > 0 ? Math.max(4, Math.round((d.total / maxDaily) * 100)) : 2;
+            const isSelected = selectedDay === i;
+            return (
+              <button
+                key={i}
+                onClick={() => setSelectedDay(isSelected ? null : i)}
+                className="flex-1 h-full flex flex-col items-center justify-end"
+                aria-label={`${d.date.toLocaleDateString("fr-FR")} : ${fmt(d.total)} FCFA`}
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    height: `${h}%`,
+                    background: isSelected ? "#1B1F1C" : "#C08A3E",
+                    borderRadius: "3px 3px 0 0",
+                    minHeight: 2,
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-1 mt-1.5">
+          {dailyData.map((d, i) => (
+            <div key={i} className="flex-1 text-center text-[8px]" style={{ color: "#6B6558" }}>
+              {d.date.toLocaleDateString("fr-FR", { weekday: "narrow" })}
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 pt-3 flex items-center justify-between text-sm" style={{ borderTop: "1px solid #DCD5C6" }}>
+          {selectedDay != null ? (
+            <>
+              <span style={{ color: "#6B6558" }} className="capitalize">{dailyData[selectedDay].date.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }}>{fmt(dailyData[selectedDay].total)} FCFA · {dailyData[selectedDay].count} vente{dailyData[selectedDay].count > 1 ? "s" : ""}</span>
+            </>
+          ) : (
+            <span className="text-xs" style={{ color: "#6B6558" }}>Touche une barre pour voir le détail du jour.</span>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg p-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+        <div className="text-xs uppercase tracking-wide mb-3" style={{ color: "#16A34A" }}>Meilleurs articles ({DAYS} jours)</div>
+        {topProducts.length === 0 ? (
+          <div className="text-sm text-center py-4" style={{ color: "#6B6558" }}>Aucune vente sur la période.</div>
+        ) : (
+          <div className="space-y-2.5">
+            {topProducts.map(([name, value]) => (
+              <div key={name}>
+                <div className="flex items-center justify-between text-xs mb-1 gap-2">
+                  <span style={{ color: "#1B1F1C" }} className="truncate">{name}</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="shrink-0">{fmt(value)} FCFA</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: "#F0ECE3" }}>
+                  <div style={{ height: 6, borderRadius: 3, background: "#C08A3E", width: `${Math.max(4, Math.round((value / maxProduct) * 100))}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {byPayment.length > 0 && (
+        <div className="rounded-lg p-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+          <div className="text-xs uppercase tracking-wide mb-3" style={{ color: "#16A34A" }}>Moyens de paiement ({DAYS} jours)</div>
+          <div className="space-y-2.5">
+            {byPayment.map(([method, value]) => (
+              <div key={method}>
+                <div className="flex items-center justify-between text-xs mb-1 gap-2">
+                  <span style={{ color: "#1B1F1C" }}>{paymentLabel(method)}</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="shrink-0">{fmt(value)} FCFA</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: "#F0ECE3" }}>
+                  <div style={{ height: 6, borderRadius: 3, background: "#C08A3E", width: `${Math.max(4, Math.round((value / maxPayment) * 100))}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1970,10 +2282,34 @@ function AgendaTab({ shifts }) {
               <Row key={s.id} n={i + 1}>
                 <div className="flex-1 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }} className="text-[15px]">{s.name}</div>
-                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>
-                      {s.role === "gerant" ? "Gérant" : "Vendeur"} · connecté à {new Date(s.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                    <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px] flex items-center gap-1.5 flex-wrap">
+                      {s.name}
+                      {s.locationFlag === "ok" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#16A34A22", color: "#16A34A" }}>📍 sur place</span>
+                      )}
+                      {s.locationFlag === "hors_zone" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#DC4C3C22", color: "#DC4C3C" }}>⚠️ hors zone{s.distance != null ? ` (${s.distance >= 1000 ? `${(s.distance / 1000).toFixed(1)} km` : `${s.distance} m`})` : ""}</span>
+                      )}
+                      {s.locationFlag === "non_verifiee" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#DCD5C6", color: "#6B6558" }}>position non vérifiée</span>
+                      )}
                     </div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>
+                      {s.role === "gerant" ? "Gérant" : s.role === "caissier" ? "Caissier" : "Vendeur"} · {new Date(s.time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                      {s.endTime ? (
+                        <>
+                          {" → "}{new Date(s.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                          {" · "}{formatDuration(s.endTime - s.time)}
+                        </>
+                      ) : (
+                        <span style={{ color: "#16A34A" }}> · service en cours</span>
+                      )}
+                    </div>
+                    {s.endTime && s.endLocationFlag === "hors_zone" && (
+                      <div className="text-[9px] mt-1 inline-block px-1.5 py-0.5 rounded-full" style={{ background: "#DC4C3C22", color: "#DC4C3C" }}>
+                        ⚠️ fin hors zone{s.endDistance != null ? ` (${s.endDistance >= 1000 ? `${(s.endDistance / 1000).toFixed(1)} km` : `${s.endDistance} m`})` : ""}
+                      </div>
+                    )}
                   </div>
                   {s.signature && (
                     <img
@@ -1999,52 +2335,87 @@ function monthLabel(year, month) {
 }
 
 function PayslipModal({ data, year, month, onClose }) {
-  const { seller, salesCount, total, commission, amount } = data;
+  const { person, role, salesCount, salesTotal, commissionRate, commissionAmount, hoursMs, hourlyRate, hourlyAmount, baseSalary, gross, loanBalance, net } = data;
+  let n = 0;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "#00000088" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 space-y-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Bulletin de paie</h3>
+            <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Bulletin de paie</h3>
             <p className="text-xs mt-0.5 capitalize" style={{ color: "#6B6558" }}>{monthLabel(year, month)}</p>
           </div>
           <button onClick={onClose}><X size={20} style={{ color: "#6B6558" }} /></button>
         </div>
 
         <Ledger>
-          <Row n={1}>
+          <Row n={++n}>
             <div className="flex-1 flex items-center justify-between">
-              <span className="text-sm" style={{ color: "#6B6558" }}>Vendeur</span>
-              <span style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }}>{seller.name}</span>
+              <span className="text-sm" style={{ color: "#6B6558" }}>{role === "caissier" ? "Caissier" : "Vendeur"}</span>
+              <span style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>{person.name}</span>
             </div>
           </Row>
-          <Row n={2}>
+          <Row n={++n}>
             <div className="flex-1 flex items-center justify-between">
-              <span className="text-sm" style={{ color: "#6B6558" }}>Ventes réalisées</span>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#1B1F1C" }}>{salesCount}</span>
+              <span className="text-sm" style={{ color: "#6B6558" }}>Heures travaillées</span>
+              <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{formatDuration(hoursMs)}</span>
             </div>
           </Row>
-          <Row n={3}>
-            <div className="flex-1 flex items-center justify-between">
-              <span className="text-sm" style={{ color: "#6B6558" }}>Chiffre d'affaires généré</span>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#1B1F1C" }}>{fmt(total)} FCFA</span>
-            </div>
-          </Row>
-          <Row n={4}>
-            <div className="flex-1 flex items-center justify-between">
-              <span className="text-sm" style={{ color: "#6B6558" }}>Taux de commission</span>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#1B1F1C" }}>{commission}%</span>
-            </div>
-          </Row>
+          {hourlyRate > 0 && (
+            <Row n={++n}>
+              <div className="flex-1 flex items-center justify-between">
+                <span className="text-sm" style={{ color: "#6B6558" }}>Taux horaire × heures</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{fmt(hourlyAmount)} FCFA</span>
+              </div>
+            </Row>
+          )}
+          {baseSalary > 0 && (
+            <Row n={++n}>
+              <div className="flex-1 flex items-center justify-between">
+                <span className="text-sm" style={{ color: "#6B6558" }}>Salaire de base</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{fmt(baseSalary)} FCFA</span>
+              </div>
+            </Row>
+          )}
+          {role === "vendeur" && (
+            <>
+              <Row n={++n}>
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="text-sm" style={{ color: "#6B6558" }}>Ventes réalisées</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{salesCount}</span>
+                </div>
+              </Row>
+              <Row n={++n}>
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="text-sm" style={{ color: "#6B6558" }}>Chiffre d'affaires généré</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{fmt(salesTotal)} FCFA</span>
+                </div>
+              </Row>
+              <Row n={++n}>
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="text-sm" style={{ color: "#6B6558" }}>Commission ({commissionRate}%)</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{fmt(commissionAmount)} FCFA</span>
+                </div>
+              </Row>
+            </>
+          )}
+          {loanBalance > 0 && (
+            <Row n={++n}>
+              <div className="flex-1 flex items-center justify-between">
+                <span className="text-sm" style={{ color: "#DC4C3C" }}>Emprunt en cours à déduire</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif", color: "#DC4C3C" }}>− {fmt(loanBalance)} FCFA</span>
+              </div>
+            </Row>
+          )}
         </Ledger>
 
         <div className="rounded-lg p-4 flex items-center justify-between" style={{ background: "#C08A3E1A", border: "1px solid #C08A3E55" }}>
-          <span className="text-sm" style={{ color: "#1B1F1C" }}>Montant à verser</span>
-          <span style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-xl">{fmt(amount)} FCFA</span>
+          <span className="text-sm" style={{ color: "#1B1F1C" }}>Montant net à verser</span>
+          <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-xl">{fmt(net)} FCFA</span>
         </div>
 
         <p className="text-[10px]" style={{ color: "#16A34A" }}>
-          Calcul basé sur les ventes enregistrées dans Wuri pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
+          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans Wuri pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
         </p>
 
         <button onClick={() => window.print()} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>
@@ -2055,7 +2426,7 @@ function PayslipModal({ data, year, month, onClose }) {
   );
 }
 
-function PaieTab({ sales, sellers, currentUser, isAdmin, expenses, onAddExpense, onDeleteExpense }) {
+function PaieTab({ sales, sellers, cashiers, shifts, currentUser, isAdmin, expenses, onAddExpense, onDeleteExpense }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
@@ -2096,21 +2467,43 @@ function PaieTab({ sales, sellers, currentUser, isAdmin, expenses, onAddExpense,
     setExpAmount("");
   };
 
+  const buildRow = (person, role) => {
+    const own = role === "vendeur"
+      ? periodSales.filter((sale) => (sale.sellerId ? sale.sellerId === person.id : sale.sellerName === person.name))
+      : [];
+    const salesTotal = own.reduce((sum, sale) => sum + sale.total, 0);
+    const commissionRate = person.commission || 0;
+    const commissionAmount = role === "vendeur" ? (salesTotal * commissionRate) / 100 : 0;
+    const hoursMs = (shifts || [])
+      .filter((s) => s.role === role && s.endTime && (s.personId ? s.personId === person.id : s.name === person.name))
+      .filter((s) => { const d = new Date(s.time); return d.getFullYear() === year && d.getMonth() === month; })
+      .reduce((sum, s) => sum + (s.endTime - s.time), 0);
+    const hours = hoursMs / 3600000;
+    const hourlyRate = person.hourlyRate || 0;
+    const hourlyAmount = Math.round(hours * hourlyRate);
+    const baseSalary = person.baseSalary || 0;
+    const gross = commissionAmount + hourlyAmount + baseSalary;
+    const loanBalance = person.loanBalance || 0;
+    const net = Math.max(0, gross - loanBalance);
+    return { person, role, salesCount: own.length, salesTotal, commissionRate, commissionAmount, hoursMs, hours, hourlyRate, hourlyAmount, baseSalary, gross, loanBalance, net };
+  };
+
   const rows = useMemo(() => {
-    const list = isAdmin ? sellers : sellers.filter((s) => s.id === currentUser?.id);
-    return list.map((s) => {
-      const own = periodSales.filter((sale) => (sale.sellerId ? sale.sellerId === s.id : sale.sellerName === s.name));
-      const total = own.reduce((sum, sale) => sum + sale.total, 0);
-      const commission = s.commission || 0;
-      return { seller: s, salesCount: own.length, total, commission, amount: (total * commission) / 100 };
-    });
-  }, [sellers, periodSales, isAdmin, currentUser]);
+    const sellerList = isAdmin ? sellers : (currentUser?.role === "vendeur" ? sellers.filter((s) => s.id === currentUser.id) : []);
+    const cashierList = isAdmin ? (cashiers || []) : (currentUser?.role === "caissier" ? (cashiers || []).filter((c) => c.id === currentUser.id) : []);
+    return [
+      ...sellerList.map((s) => buildRow(s, "vendeur")),
+      ...cashierList.map((c) => buildRow(c, "caissier")),
+    ];
+  }, [sellers, cashiers, periodSales, shifts, isAdmin, currentUser, year, month]);
+
+  const totalPayroll = rows.reduce((sum, r) => sum + r.net, 0);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <button onClick={() => shiftMonth(-1)} className="w-8 h-8 rounded-full flex items-center justify-center text-sm" style={{ background: "#FFFFFF", color: "#1B1F1C", border: "1px solid #DCD5C6" }}>‹</button>
-        <span style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-sm capitalize">{monthLabel(year, month)}</span>
+        <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-sm capitalize">{monthLabel(year, month)}</span>
         <button onClick={() => shiftMonth(1)} className="w-8 h-8 rounded-full flex items-center justify-center text-sm" style={{ background: "#FFFFFF", color: "#1B1F1C", border: "1px solid #DCD5C6" }}>›</button>
       </div>
 
@@ -2118,35 +2511,41 @@ function PaieTab({ sales, sellers, currentUser, isAdmin, expenses, onAddExpense,
         <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
           <div className="flex items-center justify-between text-sm">
             <span style={{ color: "#6B6558" }}>Ventes du mois</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#16A34A" }}>{fmt(totalSalesPeriod)} FCFA</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: "#16A34A" }}>{fmt(totalSalesPeriod)} FCFA</span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span style={{ color: "#6B6558" }}>Dépenses du mois</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#DC4C3C" }}>− {fmt(totalExpensesPeriod)} FCFA</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: "#DC4C3C" }}>− {fmt(totalExpensesPeriod)} FCFA</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span style={{ color: "#6B6558" }}>Salaires du mois (net)</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: "#DC4C3C" }}>− {fmt(totalPayroll)} FCFA</span>
           </div>
           <div className="flex items-center justify-between text-sm pt-2" style={{ borderTop: "1px solid #DCD5C6" }}>
-            <span style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }}>Bilan net</span>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }}>{fmt(totalSalesPeriod - totalExpensesPeriod)} FCFA</span>
+            <span style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>Bilan net</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }}>{fmt(totalSalesPeriod - totalExpensesPeriod - totalPayroll)} FCFA</span>
           </div>
         </div>
       )}
 
-      {sellers.length === 0 ? (
-        <div className="py-6 text-center text-sm" style={{ color: "#16A34A99" }}>Aucun vendeur enregistré pour l'instant.</div>
+      {sellers.length === 0 && (cashiers || []).length === 0 ? (
+        <div className="py-6 text-center text-sm" style={{ color: "#16A34A99" }}>Aucun vendeur ni caissier enregistré pour l'instant.</div>
       ) : rows.length === 0 ? (
-        <div className="py-6 text-center text-sm" style={{ color: "#16A34A99" }}>Aucun accès vendeur à afficher.</div>
+        <div className="py-6 text-center text-sm" style={{ color: "#16A34A99" }}>Aucun accès à afficher.</div>
       ) : (
         <Ledger>
           {rows.map((r, i) => (
-            <Row key={r.seller.id} n={i + 1}>
+            <Row key={`${r.role}-${r.person.id}`} n={i + 1}>
               <button onClick={() => setOpenSlip(r)} className="flex-1 flex items-center justify-between text-left">
                 <div>
-                  <div style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }} className="text-[15px]">{r.seller.name}</div>
+                  <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px]">{r.person.name} <span className="text-[10px]" style={{ color: "#6B6558" }}>{r.role === "caissier" ? "(caissier)" : ""}</span></div>
                   <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>
-                    {r.salesCount} vente{r.salesCount > 1 ? "s" : ""} · {fmt(r.total)} FCFA vendus · {r.commission}%
+                    {formatDuration(r.hoursMs)}
+                    {r.role === "vendeur" && ` · ${r.salesCount} vente${r.salesCount > 1 ? "s" : ""} · ${fmt(r.salesTotal)} FCFA vendus · ${r.commissionRate}%`}
+                    {r.loanBalance > 0 && ` · doit ${fmt(r.loanBalance)} FCFA`}
                   </div>
                 </div>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }} className="text-sm">{fmt(r.amount)} FCFA</div>
+                <div style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-sm">{fmt(r.net)} FCFA</div>
               </button>
             </Row>
           ))}
@@ -2170,7 +2569,7 @@ function PaieTab({ sales, sellers, currentUser, isAdmin, expenses, onAddExpense,
               type="number"
               placeholder="Montant"
               className="w-28 px-3 py-2 rounded-md text-sm outline-none"
-              style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+              style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
             />
             <button onClick={addExpense} className="px-3 rounded-md" style={{ background: "#C08A3E", color: "#F0ECE3" }}>
               <Plus size={16} />
@@ -2186,7 +2585,7 @@ function PaieTab({ sales, sellers, currentUser, isAdmin, expenses, onAddExpense,
                       <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{new Date(e.date).toLocaleDateString("fr-FR")}</div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#DC4C3C" }} className="text-sm">{fmt(e.amount)} FCFA</span>
+                      <span style={{ fontFamily: "'Carlito', sans-serif", color: "#DC4C3C" }} className="text-sm">{fmt(e.amount)} FCFA</span>
                       <button onClick={() => onDeleteExpense(e.id)} style={{ color: "#16A34A" }}><Trash2 size={14} /></button>
                     </div>
                   </div>
@@ -2222,13 +2621,13 @@ function PurchasesModal({ products, purchases, onAdd, onDelete, onClose }) {
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6" style={{ background: "#00000099" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl p-5 space-y-4" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between">
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Achats & fournisseurs</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Achats & fournisseurs</h3>
           <button onClick={onClose}><X size={18} style={{ color: "#6B6558" }} /></button>
         </div>
 
         <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#C08A3E1A" }}>
           <span className="text-sm" style={{ color: "#1B1F1C" }}>Total des achats enregistrés</span>
-          <span style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-lg">{fmt(total)} FCFA</span>
+          <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-lg">{fmt(total)} FCFA</span>
         </div>
 
         <div className="space-y-2 p-3 rounded-lg" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
@@ -2236,8 +2635,8 @@ function PurchasesModal({ products, purchases, onAdd, onDelete, onClose }) {
           <input value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="Article acheté" list="purchase-products" className="w-full px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
           <datalist id="purchase-products">{products.map((p) => <option key={p.id} value={p.name} />)}</datalist>
           <div className="grid grid-cols-2 gap-2">
-            <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantité" className="px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Montant payé (FCFA)" className="px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+            <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantité" className="px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Montant payé (FCFA)" className="px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
           </div>
           <button onClick={add} disabled={!supplier.trim() || !productName.trim() || !amount} className="w-full py-2 rounded-md text-sm font-medium disabled:opacity-40" style={{ background: "#C08A3E", color: "#FFFFFF" }}>
             Ajouter l'achat
@@ -2253,7 +2652,7 @@ function PurchasesModal({ products, purchases, onAdd, onDelete, onClose }) {
                 <div className="text-xs" style={{ color: "#6B6558" }}>{p.supplier} · {new Date(p.date).toLocaleDateString("fr-FR")}</div>
               </div>
               <div className="flex items-center gap-2">
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E" }}>{fmt(p.amount)} FCFA</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }}>{fmt(p.amount)} FCFA</span>
                 <button onClick={() => onDelete(p.id)}><Trash2 size={14} style={{ color: "#DC4C3C" }} /></button>
               </div>
             </div>
@@ -2284,7 +2683,7 @@ function ClotureModal({ sales, closures, onSave, onClose }) {
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6" style={{ background: "#00000099" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm max-h-[85vh] overflow-y-auto rounded-t-2xl md:rounded-2xl p-5 space-y-4" style={{ background: "#FFFFFF" }}>
         <div className="flex items-center justify-between">
-          <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Clôture de caisse</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Clôture de caisse</h3>
           <button onClick={onClose}><X size={18} style={{ color: "#6B6558" }} /></button>
         </div>
 
@@ -2294,7 +2693,7 @@ function ClotureModal({ sales, closures, onSave, onClose }) {
 
         <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#C08A3E1A" }}>
           <span className="text-sm" style={{ color: "#1B1F1C" }}>Total théorique (espèces)</span>
-          <span style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-lg">{fmt(theoretical)} FCFA</span>
+          <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-lg">{fmt(theoretical)} FCFA</span>
         </div>
 
         <div>
@@ -2305,13 +2704,13 @@ function ClotureModal({ sales, closures, onSave, onClose }) {
             onChange={(e) => setCounted(e.target.value)}
             placeholder="Montant compté"
             className="w-full mt-1 px-3 py-2.5 rounded-md text-sm outline-none"
-            style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+            style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
           />
         </div>
 
         {diff !== null && (
           <div className="rounded-lg p-3 text-center" style={{ background: diff === 0 ? "#16A34A1A" : "#DC4C3C1A" }}>
-            <div style={{ fontFamily: "'Fraunces', serif", color: diff === 0 ? "#16A34A" : "#DC4C3C" }} className="text-xl">
+            <div style={{ fontFamily: "'Carlito', sans-serif", color: diff === 0 ? "#16A34A" : "#DC4C3C" }} className="text-xl">
               {diff === 0 ? "Caisse juste ✓" : `${diff > 0 ? "+" : ""}${fmt(diff)} FCFA`}
             </div>
             <div className="text-xs mt-1" style={{ color: "#6B6558" }}>{diff === 0 ? "Aucun écart" : diff > 0 ? "Surplus en caisse" : "Manque en caisse"}</div>
@@ -2329,7 +2728,7 @@ function ClotureModal({ sales, closures, onSave, onClose }) {
               {history.map((c) => (
                 <div key={c.id} className="flex items-center justify-between text-xs p-2 rounded-md" style={{ background: "#F0ECE3" }}>
                   <span style={{ color: "#6B6558" }}>{new Date(c.date).toLocaleDateString("fr-FR")}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: c.diff === 0 ? "#16A34A" : "#DC4C3C" }}>{c.diff > 0 ? "+" : ""}{fmt(c.diff)} FCFA</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: c.diff === 0 ? "#16A34A" : "#DC4C3C" }}>{c.diff > 0 ? "+" : ""}{fmt(c.diff)} FCFA</span>
                 </div>
               ))}
             </div>
@@ -2365,12 +2764,12 @@ function DevisModal({ products, clients, shopName, receiptFormat, onClose }) {
       `}</style>
       <div onClick={(e) => e.stopPropagation()} className="mte-devis w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-xl p-5 space-y-3" style={{ background: "#FFFFFF", color: "#1B1F1C" }}>
         <div className="flex items-center justify-between no-print">
-          <h3 style={{ fontFamily: "'Fraunces', serif" }} className="text-lg">Nouveau devis</h3>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif" }} className="text-lg">Nouveau devis</h3>
           <button onClick={onClose}><X size={18} style={{ color: "#6B6558" }} /></button>
         </div>
 
         <div className="text-center space-y-0.5">
-          <p className="text-base font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{shopName || "Mon commerce"}</p>
+          <p className="text-base font-semibold" style={{ fontFamily: "'Carlito', sans-serif" }}>{shopName || "Mon commerce"}</p>
           <p className="text-[11px]" style={{ color: "#6B6558" }}>DEVIS — valable jusqu'au {validUntil.toLocaleDateString("fr-FR")}</p>
         </div>
 
@@ -2388,8 +2787,8 @@ function DevisModal({ products, clients, shopName, receiptFormat, onClose }) {
           {lines.map((l) => (
             <div key={l.id} className="flex items-center gap-1.5">
               <input value={l.name} onChange={(e) => updateLine(l.id, { name: e.target.value })} placeholder="Article" list="devis-products" className="flex-1 px-2 py-1.5 rounded-md text-xs outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
-              <input type="number" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} className="w-12 px-1 py-1.5 rounded-md text-xs text-center outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
-              <input type="number" value={l.price} onChange={(e) => updateLine(l.id, { price: e.target.value })} placeholder="Prix" className="w-20 px-1 py-1.5 rounded-md text-xs text-right outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }} />
+              <input type="number" value={l.qty} onChange={(e) => updateLine(l.id, { qty: e.target.value })} className="w-12 px-1 py-1.5 rounded-md text-xs text-center outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
+              <input type="number" value={l.price} onChange={(e) => updateLine(l.id, { price: e.target.value })} placeholder="Prix" className="w-20 px-1 py-1.5 rounded-md text-xs text-right outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
               <button onClick={() => removeLine(l.id)} className="no-print"><X size={14} style={{ color: "#DC4C3C" }} /></button>
             </div>
           ))}
@@ -2399,7 +2798,7 @@ function DevisModal({ products, clients, shopName, receiptFormat, onClose }) {
 
         <div className="border-t pt-2 flex items-center justify-between" style={{ borderColor: "#DCD5C6" }}>
           <span className="text-sm font-semibold">Total</span>
-          <span className="text-base font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{fmt(total)} FCFA</span>
+          <span className="text-base font-semibold" style={{ fontFamily: "'Carlito', sans-serif" }}>{fmt(total)} FCFA</span>
         </div>
 
         <div className="flex gap-2 pt-2 no-print">
@@ -2416,7 +2815,7 @@ function DevisModal({ products, clients, shopName, receiptFormat, onClose }) {
 }
 
 /* ---------- Réglages ---------- */
-function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onReset, hours, setHours, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients }) {
+function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -2424,21 +2823,96 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
   const [reportPeriod, setReportPeriod] = useState(null);
   const [keyDraft, setKeyDraft] = useState(fedapayKey || "");
   const [keySaved, setKeySaved] = useState(false);
+  const [emailDraft, setEmailDraft] = useState(gerantEmail || "");
+  const [emailSaved, setEmailSaved] = useState(false);
   const [loyaltyDraft, setLoyaltyDraft] = useState(loyaltyRate || "");
   const [showPurchases, setShowPurchases] = useState(false);
   const [showClosure, setShowClosure] = useState(false);
   const [showDevis, setShowDevis] = useState(false);
+  const [capturingLocation, setCapturingLocation] = useState(false);
+  const [locationError, setLocationError] = useState("");
+  const captureShopLocation = async () => {
+    setLocationError("");
+    setCapturingLocation(true);
+    try {
+      const pos = await getCurrentPosition();
+      setShopLocation(pos);
+    } catch (e) {
+      setLocationError("Position impossible à obtenir. Vérifie que la localisation est activée sur ton téléphone.");
+    } finally {
+      setCapturingLocation(false);
+    }
+  };
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoError, setLogoError] = useState("");
+  const handleLogoChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setLogoError("");
+    setLogoUploading(true);
+    try {
+      const oldUrl = shopLogoUrl;
+      const url = await storage.uploadShopLogo(file, shopId);
+      setShopLogoUrl(url);
+      if (oldUrl && oldUrl !== url) storage.deleteShopLogo(oldUrl);
+    } catch (err) {
+      setLogoError("Envoi du logo impossible. Vérifie ta connexion et réessaie.");
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+  const removeLogo = () => {
+    const oldUrl = shopLogoUrl;
+    setShopLogoUrl("");
+    if (oldUrl) storage.deleteShopLogo(oldUrl);
+  };
+  const [loanEditing, setLoanEditing] = useState(null); // { type: 'seller' | 'cashier', id } | null
+  const [loanAmount, setLoanAmount] = useState("");
+  const [loanNote, setLoanNote] = useState("");
+
+  const toggleLoanEditor = (type, id) => {
+    if (loanEditing && loanEditing.type === type && loanEditing.id === id) {
+      setLoanEditing(null);
+    } else {
+      setLoanEditing({ type, id });
+      setLoanAmount("");
+      setLoanNote("");
+    }
+  };
+
+  const submitLoan = (direction) => {
+    const amount = parseFloat(loanAmount);
+    if (!amount || amount <= 0 || !loanEditing) return;
+    if (loanEditing.type === "seller") {
+      if (direction === "emprunt") onAddSellerLoan(loanEditing.id, amount, loanNote.trim());
+      else onRepaySellerLoan(loanEditing.id, amount);
+    } else {
+      if (direction === "emprunt") onAddCashierLoan(loanEditing.id, amount, loanNote.trim());
+      else onRepayCashierLoan(loanEditing.id, amount);
+    }
+    setLoanEditing(null);
+    setLoanAmount("");
+    setLoanNote("");
+  };
 
   return (
     <div className="space-y-6">
       <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
         <div className="flex items-center gap-2 text-sm" style={{ color: "#1B1F1C" }}>
           <User size={16} style={{ color: "#C08A3E" }} />
-          Connecté en tant que <span style={{ fontFamily: "'Fraunces', serif" }}>{currentUser?.name}</span>
+          Connecté en tant que <span style={{ fontFamily: "'Carlito', sans-serif" }}>{currentUser?.name}</span>
         </div>
-        <button onClick={onLogout} className="text-xs px-3 py-1.5 rounded-md flex items-center gap-1" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>
-          <LogOut size={12} /> Changer
-        </button>
+        <div className="flex items-center gap-2">
+          {onEndService && (
+            <button onClick={onEndService} className="text-xs px-3 py-1.5 rounded-md flex items-center gap-1" style={{ background: "#C08A3E1A", color: "#C08A3E" }}>
+              <PenTool size={12} /> Terminer le service
+            </button>
+          )}
+          <button onClick={onLogout} className="text-xs px-3 py-1.5 rounded-md flex items-center gap-1" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>
+            <LogOut size={12} /> Changer
+          </button>
+        </div>
       </div>
 
       {isAdmin && (
@@ -2463,7 +2937,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
         <div>
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Code de ce commerce</div>
           <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#C08A3E", letterSpacing: "0.15em" }} className="text-sm">{shopId}</span>
+            <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E", letterSpacing: "0.15em" }} className="text-sm">{shopId}</span>
           </div>
           <p className="text-[10px] mt-1.5" style={{ color: "#6B6558" }}>Donne ce code à tes employés ou utilise-le sur un autre appareil pour rejoindre ce même registre.</p>
         </div>
@@ -2485,6 +2959,64 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
 
       {isAdmin && (
         <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Logo du commerce</div>
+          <div className="rounded-lg p-3 flex items-center gap-3" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+            <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+              {shopLogoUrl ? (
+                <img src={shopLogoUrl} alt="Logo du commerce" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl">{BUSINESS_TYPES[businessType]?.icon || "🏪"}</span>
+              )}
+            </div>
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <p className="text-xs" style={{ color: "#6B6558" }}>Mets la photo du logo de ta {BUSINESS_TYPES[businessType]?.label?.toLowerCase() || "commerce"} : elle apparaîtra en haut de l'application une fois connecté.</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer" style={{ background: "#C08A3E", color: "#FFFFFF" }}>
+                  {logoUploading ? "Envoi…" : shopLogoUrl ? "Changer" : "Ajouter une photo"}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleLogoChange} disabled={logoUploading} />
+                </label>
+                {shopLogoUrl && !logoUploading && (
+                  <button onClick={removeLogo} className="text-xs" style={{ color: "#DC4C3C" }}>Retirer</button>
+                )}
+              </div>
+              {logoError && <p className="text-[10px]" style={{ color: "#DC4C3C" }}>{logoError}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
+            <ScanLine size={13} /> Emplacement du commerce
+          </div>
+          <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+            <p className="text-xs" style={{ color: "#6B6558" }}>
+              Enregistre la position GPS de ton commerce depuis ici, sur place. À chaque prise de service, l'application compare la position de l'appareil à celle-ci (tolérance {SHOP_RADIUS_METERS} m) pour vérifier que le vendeur ou le caissier est bien sur place. Ça n'empêche personne de se connecter — ça ajoute juste un repère "sur place" ou "hors zone" visible dans l'Agenda.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={captureShopLocation}
+                disabled={capturingLocation}
+                className="px-4 py-2 rounded-md text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+                style={{ background: "#C08A3E", color: "#FFFFFF" }}
+              >
+                {capturingLocation ? (<><Loader2 size={14} className="animate-spin" /> Localisation…</>) : (shopLocation ? "Mettre à jour la position" : "Enregistrer la position actuelle")}
+              </button>
+              {shopLocation && (
+                <span className="text-xs" style={{ color: "#16A34A" }}>✓ Position enregistrée</span>
+              )}
+            </div>
+            {locationError && <p className="text-[10px]" style={{ color: "#DC4C3C" }}>{locationError}</p>}
+            {!shopLocation && !locationError && (
+              <p className="text-[10px]" style={{ color: "#6B6558" }}>Aucune position enregistrée pour l'instant : les prises de service seront marquées "non vérifiées".</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div>
           <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
             <Globe size={13} /> Paiement en ligne
           </div>
@@ -2497,7 +3029,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
               onChange={(e) => { setKeyDraft(e.target.value); setKeySaved(false); }}
               placeholder="Clé publique FedaPay (pk_live_... ou pk_sandbox_...)"
               className="w-full px-3 py-2.5 rounded-md text-sm outline-none"
-              style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+              style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
             />
             <div className="flex items-center gap-2">
               <button
@@ -2521,6 +3053,37 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
 
       {isAdmin && (
         <div>
+          <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
+            <Send size={13} /> Email du gérant
+          </div>
+          <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+            <p className="text-xs" style={{ color: "#6B6558" }}>
+              Renseigne ton adresse email pour pouvoir recevoir le rapport du jour et les alertes de stock bas par email, en plus du WhatsApp.
+            </p>
+            <input
+              type="email"
+              value={emailDraft}
+              onChange={(e) => { setEmailDraft(e.target.value); setEmailSaved(false); }}
+              placeholder="ton.email@exemple.com"
+              className="w-full px-3 py-2.5 rounded-md text-sm outline-none"
+              style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setGerantEmail(emailDraft.trim()); setEmailSaved(true); }}
+                className="px-4 py-2 rounded-md text-sm font-medium"
+                style={{ background: "#C08A3E", color: "#FFFFFF" }}
+              >
+                Enregistrer
+              </button>
+              {emailSaved && <span className="text-xs" style={{ color: "#16A34A" }}>✓ Email enregistré</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div>
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Fidélité client</div>
           <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
             <p className="text-xs" style={{ color: "#6B6558" }}>Donne 1 point de fidélité tous les X FCFA dépensés par un client. Laisse à 0 pour désactiver.</p>
@@ -2531,7 +3094,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
                 onChange={(e) => setLoyaltyDraft(e.target.value)}
                 placeholder="Ex : 1000"
                 className="flex-1 px-3 py-2 rounded-md text-sm outline-none"
-                style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
               />
               <button onClick={() => setLoyaltyRate(parseInt(loyaltyDraft) || 0)} className="px-4 py-2 rounded-md text-sm font-medium" style={{ background: "#C08A3E", color: "#FFFFFF" }}>
                 Enregistrer
@@ -2551,7 +3114,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
             <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Avis clients</div>
             <div className="rounded-lg p-3 flex items-center justify-between" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
               <span className="text-sm flex items-center gap-1.5" style={{ color: "#1B1F1C" }}><Star size={14} style={{ color: "#C08A3E" }} /> Note moyenne</span>
-              <span style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-lg">{avg.toFixed(1)} / 5 <span className="text-xs" style={{ color: "#6B6558", fontFamily: "'Inter', sans-serif" }}>({allReviews.length} avis)</span></span>
+              <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-lg">{avg.toFixed(1)} / 5 <span className="text-xs" style={{ color: "#6B6558", fontFamily: "'Carlito', sans-serif" }}>({allReviews.length} avis)</span></span>
             </div>
           </div>
         );
@@ -2604,7 +3167,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
                 value={hours?.open || "08:00"}
                 onChange={(e) => setHours((h) => ({ ...(h || {}), open: e.target.value }))}
                 className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none"
-                style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
               />
             </div>
             <div className="flex-1">
@@ -2614,7 +3177,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
                 value={hours?.close || "18:00"}
                 onChange={(e) => setHours((h) => ({ ...(h || {}), close: e.target.value }))}
                 className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none"
-                style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
               />
             </div>
           </div>
@@ -2627,29 +3190,81 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
           <div className="space-y-2 mb-3">
             {sellers.length === 0 && <p className="text-xs" style={{ color: "#6B6558" }}>Aucun vendeur pour l'instant.</p>}
             {sellers.map((s) => (
-              <div key={s.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
-                <span className="text-sm flex items-center gap-2 flex-1 min-w-0">
-                  <User size={14} style={{ color: "#16A34A" }} className="shrink-0" />
+              <div key={s.id} className="rounded-lg p-3" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm flex items-center gap-2 flex-1 min-w-0">
+                    <User size={14} style={{ color: "#16A34A" }} className="shrink-0" />
+                    <input
+                      value={s.name}
+                      onChange={(e) => onRenameSeller(s.id, e.target.value)}
+                      className="bg-transparent outline-none min-w-0 flex-1"
+                      style={{ color: "#1B1F1C" }}
+                    />
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={s.commission ?? 0}
+                        onChange={(e) => onUpdateCommission(s.id, parseFloat(e.target.value) || 0)}
+                        className="w-14 px-2 py-1 rounded-md text-sm text-right outline-none"
+                        style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
+                      />
+                      <span className="text-xs" style={{ color: "#6B6558" }}>%</span>
+                    </div>
+                    <button onClick={() => onRemoveSeller(s.id)} className="text-xs" style={{ color: "#DC4C3C" }}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 mt-2">
+                  <span className="text-[11px]" style={{ color: "#6B6558" }}>Taux horaire</span>
                   <input
-                    value={s.name}
-                    onChange={(e) => onRenameSeller(s.id, e.target.value)}
-                    className="bg-transparent outline-none min-w-0 flex-1"
-                    style={{ color: "#1B1F1C" }}
+                    type="number"
+                    value={s.hourlyRate ?? 0}
+                    onChange={(e) => onUpdateSellerHourlyRate(s.id, parseFloat(e.target.value) || 0)}
+                    className="w-20 px-2 py-1 rounded-md text-sm text-right outline-none ml-auto"
+                    style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
                   />
-                </span>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1">
+                  <span className="text-[11px]" style={{ color: "#6B6558" }}>FCFA/h</span>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: "1px solid #DCD5C6" }}>
+                  <span className="text-[11px]" style={{ color: (s.loanBalance || 0) > 0 ? "#DC4C3C" : "#6B6558" }}>
+                    {(s.loanBalance || 0) > 0 ? `Doit ${fmt(s.loanBalance)} FCFA` : "Aucun emprunt"}
+                  </span>
+                  <button
+                    onClick={() => toggleLoanEditor("seller", s.id)}
+                    className="text-[11px] px-2 py-1 rounded flex items-center gap-1"
+                    style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#C08A3E" }}
+                  >
+                    <Banknote size={12} /> Emprunt
+                  </button>
+                </div>
+                {loanEditing && loanEditing.type === "seller" && loanEditing.id === s.id && (
+                  <div className="mt-2 space-y-1.5">
                     <input
                       type="number"
-                      value={s.commission ?? 0}
-                      onChange={(e) => onUpdateCommission(s.id, parseFloat(e.target.value) || 0)}
-                      className="w-14 px-2 py-1 rounded-md text-sm text-right outline-none"
-                      style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+                      value={loanAmount}
+                      onChange={(e) => setLoanAmount(e.target.value)}
+                      placeholder="Montant (FCFA)"
+                      className="w-full px-2 py-1.5 rounded-md text-xs outline-none"
+                      style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
                     />
-                    <span className="text-xs" style={{ color: "#6B6558" }}>%</span>
+                    <input
+                      value={loanNote}
+                      onChange={(e) => setLoanNote(e.target.value)}
+                      placeholder="Motif (optionnel)"
+                      className="w-full px-2 py-1.5 rounded-md text-xs outline-none"
+                      style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => submitLoan("emprunt")} className="flex-1 py-1.5 rounded-md text-xs" style={{ background: "#DC4C3C1A", color: "#DC4C3C" }}>
+                        + Emprunt
+                      </button>
+                      <button onClick={() => submitLoan("remboursement")} className="flex-1 py-1.5 rounded-md text-xs" style={{ background: "#16A34A1A", color: "#16A34A" }}>
+                        Remboursement
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => onRemoveSeller(s.id)} className="text-xs" style={{ color: "#DC4C3C" }}><Trash2 size={14} /></button>
-                </div>
+                )}
               </div>
             ))}
           </div>
@@ -2661,7 +3276,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
               onChange={(e) => setNewCommission(e.target.value)}
               placeholder="%"
               className="w-16 px-2 py-2 rounded-md text-sm text-right outline-none"
-              style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'IBM Plex Mono', monospace" }}
+              style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
             />
             <button
               disabled={!newName.trim()}
@@ -2672,7 +3287,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
               <UserPlus size={14} /> Créer
             </button>
           </div>
-          <p className="text-[10px] mt-1.5" style={{ color: "#6B6558" }}>Le pourcentage définit la commission de ce vendeur sur ses propres ventes, utilisée dans l'onglet Paie.</p>
+          <p className="text-[10px] mt-1.5" style={{ color: "#6B6558" }}>Le pourcentage définit la commission de ce vendeur sur ses propres ventes. Le taux horaire (optionnel) est multiplié par les heures travaillées (calculées depuis l'Agenda) pour le salaire fixe. Les deux sont utilisés dans l'onglet Paie.</p>
         </div>
       )}
 
@@ -2682,17 +3297,69 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
           <div className="space-y-2 mb-3">
             {cashiers.length === 0 && <p className="text-xs" style={{ color: "#6B6558" }}>Aucun caissier pour l'instant.</p>}
             {cashiers.map((c) => (
-              <div key={c.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
-                <span className="text-sm flex items-center gap-2 flex-1 min-w-0">
-                  <Receipt size={14} style={{ color: "#16A34A" }} className="shrink-0" />
+              <div key={c.id} className="rounded-lg p-3" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm flex items-center gap-2 flex-1 min-w-0">
+                    <Receipt size={14} style={{ color: "#16A34A" }} className="shrink-0" />
+                    <input
+                      value={c.name}
+                      onChange={(e) => onRenameCashier(c.id, e.target.value)}
+                      className="bg-transparent outline-none min-w-0 flex-1"
+                      style={{ color: "#1B1F1C" }}
+                    />
+                  </span>
+                  <button onClick={() => onRemoveCashier(c.id)} className="text-xs" style={{ color: "#DC4C3C" }}><Trash2 size={14} /></button>
+                </div>
+                <div className="flex items-center gap-1 mt-2">
+                  <span className="text-[11px]" style={{ color: "#6B6558" }}>Taux horaire</span>
                   <input
-                    value={c.name}
-                    onChange={(e) => onRenameCashier(c.id, e.target.value)}
-                    className="bg-transparent outline-none min-w-0 flex-1"
-                    style={{ color: "#1B1F1C" }}
+                    type="number"
+                    value={c.hourlyRate ?? 0}
+                    onChange={(e) => onUpdateCashierHourlyRate(c.id, parseFloat(e.target.value) || 0)}
+                    className="w-20 px-2 py-1 rounded-md text-sm text-right outline-none ml-auto"
+                    style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
                   />
-                </span>
-                <button onClick={() => onRemoveCashier(c.id)} className="text-xs" style={{ color: "#DC4C3C" }}><Trash2 size={14} /></button>
+                  <span className="text-[11px]" style={{ color: "#6B6558" }}>FCFA/h</span>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: "1px solid #DCD5C6" }}>
+                  <span className="text-[11px]" style={{ color: (c.loanBalance || 0) > 0 ? "#DC4C3C" : "#6B6558" }}>
+                    {(c.loanBalance || 0) > 0 ? `Doit ${fmt(c.loanBalance)} FCFA` : "Aucun emprunt"}
+                  </span>
+                  <button
+                    onClick={() => toggleLoanEditor("cashier", c.id)}
+                    className="text-[11px] px-2 py-1 rounded flex items-center gap-1"
+                    style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#C08A3E" }}
+                  >
+                    <Banknote size={12} /> Emprunt
+                  </button>
+                </div>
+                {loanEditing && loanEditing.type === "cashier" && loanEditing.id === c.id && (
+                  <div className="mt-2 space-y-1.5">
+                    <input
+                      type="number"
+                      value={loanAmount}
+                      onChange={(e) => setLoanAmount(e.target.value)}
+                      placeholder="Montant (FCFA)"
+                      className="w-full px-2 py-1.5 rounded-md text-xs outline-none"
+                      style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
+                    />
+                    <input
+                      value={loanNote}
+                      onChange={(e) => setLoanNote(e.target.value)}
+                      placeholder="Motif (optionnel)"
+                      className="w-full px-2 py-1.5 rounded-md text-xs outline-none"
+                      style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => submitLoan("emprunt")} className="flex-1 py-1.5 rounded-md text-xs" style={{ background: "#DC4C3C1A", color: "#DC4C3C" }}>
+                        + Emprunt
+                      </button>
+                      <button onClick={() => submitLoan("remboursement")} className="flex-1 py-1.5 rounded-md text-xs" style={{ background: "#16A34A1A", color: "#16A34A" }}>
+                        Remboursement
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -2768,7 +3435,37 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
             >
               <Receipt size={15} /> Envoyer le rapport du jour
             </button>
-            <p className="text-[10px]" style={{ color: "#6B6558" }}>Ouvre WhatsApp avec le message déjà prêt — choisis simplement à qui l'envoyer (toi-même, un associé...). L'envoi n'est pas automatique, il faut appuyer sur ce bouton.</p>
+            {gerantEmail && (
+              <>
+                <button
+                  onClick={() => {
+                    const low = products.filter((p) => p.stock <= p.threshold);
+                    const text = low.length === 0
+                      ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
+                      : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "Wuri"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                  }}
+                  className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
+                  style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#DC4C3C" }}
+                >
+                  <Send size={14} /> Envoyer l'alerte stock bas par email
+                </button>
+                <button
+                  onClick={() => {
+                    const { start, label } = periodRange("day");
+                    const todaySales = sales.filter((s) => new Date(s.date) >= start);
+                    const total = todaySales.reduce((s, v) => s + v.total, 0);
+                    const text = `${todaySales.length} vente(s)\nTotal : ${fmt(total)} FCFA`;
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "Wuri"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                  }}
+                  className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
+                  style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#16A34A" }}
+                >
+                  <Send size={14} /> Envoyer le rapport du jour par email
+                </button>
+              </>
+            )}
+            <p className="text-[10px]" style={{ color: "#6B6558" }}>Ouvre WhatsApp (ou ton application email, si une adresse est renseignée ci-dessus) avec le message déjà prêt — choisis simplement à qui l'envoyer. L'envoi n'est pas automatique, il faut appuyer sur ce bouton.</p>
           </div>
         </div>
       )}
@@ -2825,7 +3522,7 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
       </div>
 
       {reportPeriod && (
-        <DailyReportModal sales={sales} products={products} expenses={expenses} purchases={purchases} sellers={sellers} period={reportPeriod} onClose={() => setReportPeriod(null)} />
+        <DailyReportModal sales={sales} products={products} expenses={expenses} purchases={purchases} sellers={sellers} period={reportPeriod} gerantEmail={gerantEmail} onClose={() => setReportPeriod(null)} />
       )}
       {showPurchases && (
         <PurchasesModal products={products} purchases={purchases} onAdd={onAddPurchase} onDelete={onDeletePurchase} onClose={() => setShowPurchases(false)} />
@@ -2910,7 +3607,7 @@ function InstallBanner() {
       >
         <Package size={20} className="shrink-0" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold leading-tight" style={{ fontFamily: "'Fraunces', serif" }}>
+          <p className="text-sm font-semibold leading-tight" style={{ fontFamily: "'Carlito', sans-serif" }}>
             Installe Wuri sur ton téléphone
           </p>
           <p className="text-[11px] leading-tight opacity-80">Accès plus rapide, fonctionne même hors connexion</p>
@@ -2931,7 +3628,7 @@ function InstallBanner() {
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6" style={{ background: "#00000099" }} onClick={() => setShowIOSHelp(false)}>
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-6 space-y-3 text-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
             <Package size={22} style={{ color: "#C08A3E" }} className="mx-auto" />
-            <h3 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Installer sur iPhone</h3>
+            <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Installer sur iPhone</h3>
             <p className="text-sm text-left" style={{ color: "#1B1F1C" }}>
               1. Appuie sur l'icône <strong>Partager</strong> en bas de Safari (le carré avec la flèche)<br /><br />
               2. Fais défiler et choisis <strong>"Sur l'écran d'accueil"</strong><br /><br />
@@ -2962,7 +3659,7 @@ function periodRange(period) {
   return { start, label: "du jour" };
 }
 
-function DailyReportModal({ sales, products, expenses, purchases, sellers, period = "day", onClose }) {
+function DailyReportModal({ sales, products, expenses, purchases, sellers, period = "day", gerantEmail, onClose }) {
   const { start, label } = periodRange(period);
   const inRange = (t) => new Date(t) >= start;
   const todaySales = sales.filter((s) => inRange(s.date));
@@ -3007,11 +3704,11 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#1B1F1Ccc" }}>
       <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-lg p-5 space-y-4" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <div className="flex items-center justify-between">
-          <h2 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-lg">Rapport {label}</h2>
+          <h2 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Rapport {label}</h2>
           <button onClick={onClose} style={{ color: "#6B6558" }}><X size={20} /></button>
         </div>
         <div className="text-center py-3">
-          <div style={{ fontFamily: "'Fraunces', serif", color: "#C08A3E" }} className="text-3xl">{fmt(margin)} FCFA</div>
+          <div style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-3xl">{fmt(margin)} FCFA</div>
           <div className="text-xs mt-1" style={{ color: "#6B6558" }}>Marge nette estimée · {todaySales.length} vente{todaySales.length > 1 ? "s" : ""}, {fmt(total)} vendus</div>
           {(totalExpenses > 0 || totalPurchases > 0) && (
             <div className="text-[10px] mt-1" style={{ color: "#6B6558" }}>{fmt(totalExpenses)} dépenses, {fmt(totalPurchases)} achats déduits</div>
@@ -3037,7 +3734,7 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
               {top.map(([name, qty]) => (
                 <div key={name} className="flex items-center justify-between text-sm" style={{ color: "#1B1F1C" }}>
                   <span>{name}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: "#6B6558" }}>{qty}</span>
+                  <span style={{ fontFamily: "'Carlito', sans-serif", color: "#6B6558" }}>{qty}</span>
                 </div>
               ))}
             </div>
@@ -3047,7 +3744,7 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
         {topSeller && sellers && sellers.length > 1 && (
           <div className="flex items-center justify-between text-sm p-2.5 rounded-lg" style={{ background: "#F0ECE3" }}>
             <span style={{ color: "#6B6558" }}>Meilleur vendeur</span>
-            <span style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }}>{topSeller[0]} · {fmt(topSeller[1])} FCFA</span>
+            <span style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>{topSeller[0]} · {fmt(topSeller[1])} FCFA</span>
           </div>
         )}
 
@@ -3074,6 +3771,25 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
         >
           💬 Envoyer ce rapport par WhatsApp
         </button>
+        {gerantEmail && (
+          <button
+            onClick={() => {
+              const lines = [
+                `Marge nette estimée : ${fmt(margin)} FCFA`,
+                `${todaySales.length} vente${todaySales.length > 1 ? "s" : ""}, ${fmt(total)} FCFA vendus`,
+                top.length > 0 ? `Top produits : ${top.map(([n, q]) => `${n} (${q})`).join(", ")}` : null,
+                topSeller ? `Meilleur vendeur : ${topSeller[0]} (${fmt(topSeller[1])} FCFA)` : null,
+                lowStock.length > 0 ? `⚠️ Stock bas : ${lowStock.map((p) => p.name).join(", ")}` : null,
+              ].filter(Boolean).join("\n");
+              const subject = `Rapport ${label} — Wuri`;
+              window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines)}`, "_blank");
+            }}
+            className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
+            style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E55" }}
+          >
+            <Send size={14} /> Envoyer ce rapport par email
+          </button>
+        )}
         <button onClick={onClose} className="w-full py-2.5 rounded-lg text-sm" style={{ background: "#C08A3E", color: "#F0ECE3" }}>
           Fermer
         </button>
@@ -3143,9 +3859,12 @@ function AppInner() {
   const [cashiers, setCashiers, cashiersLoaded] = useShared(k("cashiers"), [], pendingRef, bumpSync);
   const [clients, setClients, clientsLoaded] = useShared(k("clients"), [], pendingRef, bumpSync);
   const [hours, setHours, hoursLoaded] = useShared(k("hours"), { open: "08:00", close: "18:00" }, pendingRef, bumpSync);
+  const [shopLocation, setShopLocation] = useShared(k("shopLocation"), null, pendingRef, bumpSync);
+  const [shopLogoUrl, setShopLogoUrl] = useShared(k("shopLogo"), "", pendingRef, bumpSync);
   const [shifts, setShifts, shiftsLoaded] = useShared(k("shifts"), [], pendingRef, bumpSync);
   const [expenses, setExpenses, expensesLoaded] = useShared(k("expenses"), [], pendingRef, bumpSync);
   const [fedapayKey, setFedapayKey, fedapayKeyLoaded] = useShared(k("fedapayKey"), "", pendingRef, bumpSync);
+  const [gerantEmail, setGerantEmail] = useShared(k("gerantEmail"), "", pendingRef, bumpSync);
   const [loyaltyRate, setLoyaltyRate] = useShared(k("loyaltyRate"), 0, pendingRef, bumpSync);
   const [purchases, setPurchases, purchasesLoaded] = useShared(k("purchases"), [], pendingRef, bumpSync);
   const [closures, setClosures, closuresLoaded] = useShared(k("closures"), [], pendingRef, bumpSync);
@@ -3305,6 +4024,44 @@ function AppInner() {
     if (shopId && shopName) rememberShop(shopId, shopName);
   }, [shopId, shopName, rememberShop]);
 
+  // ---------- Empreinte digitale : identifiants enregistrés sur CET appareil, pour ce commerce ----------
+  // Stockage local uniquement (jamais partagé) : une empreinte est propre à un appareil précis.
+  const [biometricCreds, setBiometricCreds] = useState({}); // `${role}` ou `${role}:${id}` -> { credentialId, addedAt }
+  const [biometricOffer, setBiometricOffer] = useState(null); // userKey en attente de proposition d'activation
+  useEffect(() => {
+    if (!shopId) return;
+    (async () => {
+      try {
+        const res = await storage.get(`biometric:${shopId}`, false);
+        setBiometricCreds(res ? JSON.parse(res.value) : {});
+      } catch (e) {}
+    })();
+  }, [shopId]);
+  const saveBiometricCred = useCallback((userKey, credentialId) => {
+    setBiometricCreds((prev) => {
+      const next = { ...prev, [userKey]: { credentialId, addedAt: Date.now() } };
+      storage.set(`biometric:${shopId}`, JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  }, [shopId]);
+  const removeBiometricCred = useCallback((userKey) => {
+    setBiometricCreds((prev) => {
+      const next = { ...prev };
+      delete next[userKey];
+      storage.set(`biometric:${shopId}`, JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  }, [shopId]);
+  const enrollBiometric = async (userKey, userName) => {
+    try {
+      const credentialId = await registerBiometric(userKey, userName);
+      saveBiometricCred(userKey, credentialId);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
   const joinShop = async (code) => {
     setShopId(code);
     rememberShop(code, null);
@@ -3341,11 +4098,65 @@ function AppInner() {
 
   const lowStockCount = useMemo(() => products.filter((p) => p.stock <= p.threshold).length, [products]);
 
-  const confirmSignature = (signature) => {
-    setShifts((prev) => [...prev, { id: uid(), name: pendingUser.name, role: pendingUser.role, time: Date.now(), signature }]);
+  const confirmSignature = async (signature) => {
+    // Vérifie que la prise de service se fait bien sur place : on compare la
+    // position GPS de l'appareil à celle du commerce (enregistrée une fois par
+    // le gérant). Si la position est refusée/indisponible ou que l'emplacement
+    // du commerce n'est pas encore défini, on laisse quand même signer mais on
+    // le marque comme non vérifié pour que le gérant puisse le voir dans l'agenda.
+    let locationFlag = "non_verifiee";
+    let distance = null;
+    let location = null;
+    try {
+      location = await getCurrentPosition();
+      if (shopLocation) {
+        distance = distanceMeters(location, shopLocation);
+        locationFlag = distance <= SHOP_RADIUS_METERS ? "ok" : "hors_zone";
+      }
+    } catch (e) {
+      locationFlag = "non_verifiee";
+    }
+    setShifts((prev) => [...prev, { id: uid(), personId: pendingUser.id || null, name: pendingUser.name, role: pendingUser.role, time: Date.now(), signature, location, distance, locationFlag }]);
     setCurrentUser(pendingUser);
     setLoginDate(new Date().toDateString());
+    // Propose l'empreinte digitale si l'appareil la supporte et qu'elle n'est pas
+    // déjà activée pour cette personne sur cet appareil.
+    const userKey = pendingUser.role === "gerant" ? "gerant" : `${pendingUser.role}:${pendingUser.id}`;
+    if (BIOMETRIC_SUPPORTED && !biometricCreds[userKey]) setBiometricOffer({ userKey, name: pendingUser.name });
     setPendingUser(null);
+  };
+
+  // ---------- Fin de service ----------
+  // Même principe que la prise de service : signature + position GPS, mais pour
+  // clôturer le shift en cours. Permet de calculer les heures travaillées (utilisées
+  // dans l'onglet Paie) et évite qu'un shift reste ouvert indéfiniment.
+  const [endingService, setEndingService] = useState(false);
+  const confirmEndSignature = async (signature) => {
+    let locationFlag = "non_verifiee";
+    let distance = null;
+    let location = null;
+    try {
+      location = await getCurrentPosition();
+      if (shopLocation) {
+        distance = distanceMeters(location, shopLocation);
+        locationFlag = distance <= SHOP_RADIUS_METERS ? "ok" : "hors_zone";
+      }
+    } catch (e) {
+      locationFlag = "non_verifiee";
+    }
+    setShifts((prev) => {
+      let idx = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const s = prev[i];
+        if (!s.endTime && s.name === currentUser?.name && s.role === currentUser?.role) { idx = i; break; }
+      }
+      if (idx === -1) return prev;
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], endTime: Date.now(), endSignature: signature, endLocation: location, endDistance: distance, endLocationFlag: locationFlag };
+      return copy;
+    });
+    setEndingService(false);
+    setCurrentUser(null);
   };
 
   // Déconnexion automatique à chaque nouvelle journée (mode test et vrais commerces).
@@ -3479,19 +4290,82 @@ function AppInner() {
 
   const resetAll = () => { setProducts([]); setSales([]); };
 
-  const requestGerantLogin = () => { setPinError(""); setPinTarget(null); setPinPrompt("login-gerant"); };
-  const requestVendeurLogin = (seller) => { setPinError(""); setPinTarget(seller); setPinPrompt("login-vendeur"); };
+  // Avant d'ouvrir le clavier à code : si une empreinte est enregistrée sur CET appareil
+  // pour cette personne, on tente d'abord le déverrouillage biométrique. En cas d'échec,
+  // d'annulation ou d'absence d'empreinte enregistrée, on retombe sur le code à 4 chiffres.
+  const requestGerantLogin = async () => {
+    setPinError("");
+    const cred = biometricCreds["gerant"];
+    if (cred && BIOMETRIC_SUPPORTED) {
+      try {
+        if (await verifyBiometric(cred.credentialId)) { setPendingUser({ role: "gerant", name: "Gérant" }); return; }
+      } catch (e) {}
+    }
+    setPinTarget(null);
+    setPinPrompt("login-gerant");
+  };
+  const requestVendeurLogin = async (seller) => {
+    setPinError("");
+    const userKey = `vendeur:${seller.id}`;
+    const cred = biometricCreds[userKey];
+    if (cred && BIOMETRIC_SUPPORTED) {
+      try {
+        if (await verifyBiometric(cred.credentialId)) { setPendingUser({ role: "vendeur", name: seller.name, id: seller.id }); return; }
+      } catch (e) {}
+    }
+    setPinTarget(seller);
+    setPinPrompt("login-vendeur");
+  };
   const requestCreateGerant = () => { setPinError(""); setPinPrompt("create-gerant"); };
   const requestCreateVendeur = (name, commission) => { setPinError(""); setPinTarget({ name, commission }); setPinPrompt("create-vendeur"); };
 
-  const requestCaissierLogin = (cashier) => { setPinError(""); setPinTarget(cashier); setPinPrompt("login-caissier"); };
+  const requestCaissierLogin = async (cashier) => {
+    setPinError("");
+    const userKey = `caissier:${cashier.id}`;
+    const cred = biometricCreds[userKey];
+    if (cred && BIOMETRIC_SUPPORTED) {
+      try {
+        if (await verifyBiometric(cred.credentialId)) { setPendingUser({ role: "caissier", name: cashier.name, id: cashier.id }); return; }
+      } catch (e) {}
+    }
+    setPinTarget(cashier);
+    setPinPrompt("login-caissier");
+  };
   const requestCreateCaissier = (name) => { setPinError(""); setPinTarget({ name }); setPinPrompt("create-caissier"); };
   const removeCashier = (id) => setCashiers((prev) => prev.filter((c) => c.id !== id));
   const renameCashier = (id, name) => setCashiers((prev) => prev.map((c) => (c.id === id ? { ...c, name } : c)));
 
   const removeSeller = (id) => setSellers((prev) => prev.filter((s) => s.id !== id));
   const updateSellerCommission = (id, commission) => setSellers((prev) => prev.map((s) => (s.id === id ? { ...s, commission } : s)));
+  const updateSellerSalary = (id, baseSalary) => setSellers((prev) => prev.map((s) => (s.id === id ? { ...s, baseSalary } : s)));
+  const updateSellerHourlyRate = (id, hourlyRate) => setSellers((prev) => prev.map((s) => (s.id === id ? { ...s, hourlyRate } : s)));
   const renameSeller = (id, name) => setSellers((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+  const updateCashierCommission = (id, commission) => setCashiers((prev) => prev.map((c) => (c.id === id ? { ...c, commission } : c)));
+  const updateCashierSalary = (id, baseSalary) => setCashiers((prev) => prev.map((c) => (c.id === id ? { ...c, baseSalary } : c)));
+  const updateCashierHourlyRate = (id, hourlyRate) => setCashiers((prev) => prev.map((c) => (c.id === id ? { ...c, hourlyRate } : c)));
+
+  // Emprunts du personnel : avances sur salaire/commission, saisies par le gérant
+  // uniquement. loanBalance = ce que la personne doit encore au commerce.
+  const addSellerLoan = (id, amount, note) => setSellers((prev) => prev.map((s) => (s.id === id ? {
+    ...s,
+    loanBalance: (s.loanBalance || 0) + amount,
+    loans: [...(s.loans || []), { id: uid(), amount, note: note || "", date: Date.now(), type: "emprunt" }],
+  } : s)));
+  const repaySellerLoan = (id, amount) => setSellers((prev) => prev.map((s) => (s.id === id ? {
+    ...s,
+    loanBalance: Math.max(0, (s.loanBalance || 0) - amount),
+    loans: [...(s.loans || []), { id: uid(), amount, date: Date.now(), type: "remboursement" }],
+  } : s)));
+  const addCashierLoan = (id, amount, note) => setCashiers((prev) => prev.map((c) => (c.id === id ? {
+    ...c,
+    loanBalance: (c.loanBalance || 0) + amount,
+    loans: [...(c.loans || []), { id: uid(), amount, note: note || "", date: Date.now(), type: "emprunt" }],
+  } : c)));
+  const repayCashierLoan = (id, amount) => setCashiers((prev) => prev.map((c) => (c.id === id ? {
+    ...c,
+    loanBalance: Math.max(0, (c.loanBalance || 0) - amount),
+    loans: [...(c.loans || []), { id: uid(), amount, date: Date.now(), type: "remboursement" }],
+  } : c)));
 
   const handlePinSubmit = (code) => {
     if (pinPrompt === "create-gerant") {
@@ -3521,7 +4395,7 @@ function AppInner() {
   if (!shopIdLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#F0ECE3" }}>
-        <div style={{ color: "#16A34A", fontFamily: "'IBM Plex Mono', monospace" }} className="text-sm animate-pulse">Ouverture du registre…</div>
+        <div style={{ color: "#16A34A", fontFamily: "'Carlito', sans-serif" }} className="text-sm animate-pulse">Ouverture du registre…</div>
       </div>
     );
   }
@@ -3533,7 +4407,7 @@ function AppInner() {
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#F0ECE3" }}>
-        <div style={{ color: "#16A34A", fontFamily: "'IBM Plex Mono', monospace" }} className="text-sm animate-pulse">Ouverture du registre…</div>
+        <div style={{ color: "#16A34A", fontFamily: "'Carlito', sans-serif" }} className="text-sm animate-pulse">Ouverture du registre…</div>
       </div>
     );
   }
@@ -3556,14 +4430,14 @@ function AppInner() {
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={60} />
-            <h1 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Choisis ton type de commerce pour commencer</p>
           </div>
           <div className="space-y-2">
             {Object.entries(BUSINESS_TYPES).map(([key, v]) => (
               <button key={key} onClick={() => { setBusinessType(key); requestCreateGerant(); }} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>
                 <span className="text-xl">{v.icon}</span>
-                <span style={{ fontFamily: "'Fraunces', serif" }}>{v.label}</span>
+                <span style={{ fontFamily: "'Carlito', sans-serif" }}>{v.label}</span>
               </button>
             ))}
           </div>
@@ -3582,7 +4456,7 @@ function AppInner() {
         <div className="w-full max-w-sm space-y-4 text-center">
           <Logo size={56} />
           <div>
-            <h1 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-xl">Abonnement requis</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl">Abonnement requis</h1>
             <p className="text-sm mt-2" style={{ color: "#6B6558" }}>
               La période d'essai ou l'abonnement de ce commerce est arrivé à échéance.
               L'accès est suspendu jusqu'au renouvellement.
@@ -3606,7 +4480,7 @@ function AppInner() {
     return (
       <>
         <style>{fontImport}</style>
-        <LoginScreen sellers={sellers} cashiers={cashiers} onPickGerant={requestGerantLogin} onPickVendeur={requestVendeurLogin} onPickCaissier={requestCaissierLogin} />
+        <LoginScreen sellers={sellers} cashiers={cashiers} onPickGerant={requestGerantLogin} onPickVendeur={requestVendeurLogin} onPickCaissier={requestCaissierLogin} biometricCreds={biometricCreds} onBack={leaveShop} />
         {pinPrompt && (
           <PinPad
             title={pinPrompt === "login-vendeur" || pinPrompt === "login-caissier" ? `Code de ${pinTarget?.name}` : "Code gérant"}
@@ -3631,6 +4505,7 @@ function AppInner() {
     { id: "historique", label: "Historique", icon: History },
     { id: "agenda", label: "Agenda", icon: Clock },
     { id: "paie", label: "Paie", icon: Receipt },
+    ...(isAdmin ? [{ id: "dashboard", label: "Bilan", icon: BarChart3 }] : []),
     { id: "reglages", label: "Réglages", icon: Settings },
   ];
 
@@ -3638,16 +4513,54 @@ function AppInner() {
     <div className="min-h-screen" style={{ background: "#F0ECE3" }}>
       <style>{`
         ${fontImport}
-        * { font-family: 'Inter', sans-serif; }
+        * { font-family: 'Carlito', sans-serif; }
         body { -webkit-tap-highlight-color: transparent; }
       `}</style>
+
+      {biometricOffer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#1B1F1Ccc" }}>
+          <div className="w-full max-w-sm rounded-lg p-5 space-y-3 text-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+            <div className="mx-auto flex items-center justify-center rounded-full" style={{ width: 48, height: 48, background: "#C08A3E1A" }}>
+              <ScanLine size={22} style={{ color: "#C08A3E" }} />
+            </div>
+            <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-base">Activer l'empreinte sur cet appareil ?</h3>
+            <p className="text-xs" style={{ color: "#6B6558" }}>
+              La prochaine fois, {biometricOffer.name} pourra se connecter sur ce téléphone en un geste, sans taper de code. Le code à 4 chiffres reste toujours disponible en secours.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setBiometricOffer(null)}
+                className="flex-1 py-2.5 rounded-md text-sm"
+                style={{ background: "#F0ECE3", color: "#6B6558" }}
+              >
+                Plus tard
+              </button>
+              <button
+                onClick={async () => {
+                  const ok = await enrollBiometric(biometricOffer.userKey, biometricOffer.name);
+                  setBiometricOffer(null);
+                  if (!ok) alert("L'activation a échoué ou a été annulée. Le code à 4 chiffres reste disponible.");
+                }}
+                className="flex-1 py-2.5 rounded-md text-sm font-medium"
+                style={{ background: "#C08A3E", color: "#FFFFFF" }}
+              >
+                Activer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <header className="sticky top-0 z-10 px-4 pt-5 pb-3" style={{ background: "#1B1F1Cee", backdropFilter: "blur(6px)" }}>
         <div className="max-w-lg md:max-w-6xl mx-auto flex items-center justify-between gap-6">
           <div className="flex items-center gap-2.5 shrink-0">
-            <Logo size={34} />
+            {shopLogoUrl ? (
+              <img src={shopLogoUrl} alt={shopName || "Logo du commerce"} className="rounded-lg object-cover shrink-0" style={{ width: 34, height: 34, border: "1px solid #DCD5C6" }} />
+            ) : (
+              <Logo size={34} />
+            )}
             <div>
-              <h1 style={{ fontFamily: "'Fraunces', serif", color: "#1B1F1C" }} className="text-xl leading-tight">Wuri</h1>
+              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">Wuri</h1>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <p className="text-xs" style={{ color: "#16A34A" }}>{BUSINESS_TYPES[businessType].icon} {currentUser.name}</p>
                 {isOpenNow !== null && (
@@ -3699,7 +4612,7 @@ function AppInner() {
 
           <div className="hidden md:flex items-center gap-3 shrink-0">
             <div className="text-right">
-              <p className="text-sm" style={{ color: "#1B1F1C", fontFamily: "'Fraunces', serif" }}>{currentUser.name}</p>
+              <p className="text-sm" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>{currentUser.name}</p>
               <p className="text-[11px]" style={{ color: "#6B6558" }}>{isAdmin ? "Gérant" : currentUser.role === "caissier" ? "Caissier" : "Vendeur"}</p>
             </div>
             <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold" style={{ background: "#C08A3E", color: "#FFFFFF" }}>
@@ -3732,6 +4645,8 @@ function AppInner() {
           <PaieTab
             sales={sales}
             sellers={sellers}
+            cashiers={cashiers}
+            shifts={shifts}
             currentUser={currentUser}
             isAdmin={isAdmin}
             expenses={expenses}
@@ -3739,6 +4654,7 @@ function AppInner() {
             onDeleteExpense={(id) => setExpenses((prev) => prev.filter((e) => e.id !== id))}
           />
         )}
+        {tab === "dashboard" && isAdmin && <DashboardTab sales={sales} products={products} />}
         {tab === "reglages" && (
           <ReglagesTab
             businessType={businessType}
@@ -3746,24 +4662,37 @@ function AppInner() {
             isAdmin={isAdmin}
             currentUser={currentUser}
             onLogout={() => setCurrentUser(null)}
+            onEndService={() => setEndingService(true)}
             sellers={sellers}
             onAddSeller={requestCreateVendeur}
             onRemoveSeller={removeSeller}
             onRenameSeller={renameSeller}
             onUpdateCommission={updateSellerCommission}
+            onUpdateSellerHourlyRate={updateSellerHourlyRate}
+            onAddSellerLoan={addSellerLoan}
+            onRepaySellerLoan={repaySellerLoan}
             cashiers={cashiers}
             onAddCashier={requestCreateCaissier}
             onRemoveCashier={removeCashier}
             onRenameCashier={renameCashier}
+            onUpdateCashierHourlyRate={updateCashierHourlyRate}
+            onAddCashierLoan={addCashierLoan}
+            onRepayCashierLoan={repayCashierLoan}
             onReset={resetAll}
             hours={hours}
             setHours={setHours}
+            shopLocation={shopLocation}
+            setShopLocation={setShopLocation}
+            shopLogoUrl={shopLogoUrl}
+            setShopLogoUrl={setShopLogoUrl}
             shopId={shopId}
             shopName={shopName}
             setShopName={setShopName}
             onLeaveShop={leaveShop}
             fedapayKey={fedapayKey}
             setFedapayKey={setFedapayKey}
+            gerantEmail={gerantEmail}
+            setGerantEmail={setGerantEmail}
             sales={sales}
             products={products}
             expenses={expenses}
@@ -3784,7 +4713,7 @@ function AppInner() {
       {receiptData && <ReceiptModal receipt={receiptData} onClose={() => setReceiptData(null)} format={receiptFormat} />}
 
       <nav className="fixed bottom-0 left-0 right-0 z-10 md:hidden" style={{ background: "#FFFFFF", borderTop: "1px solid #DCD5C6" }}>
-        <div className="max-w-lg mx-auto grid grid-cols-8">
+        <div className="max-w-lg mx-auto grid" style={{ gridTemplateColumns: `repeat(${TABS.length}, minmax(0, 1fr))` }}>
           {TABS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)} className="flex flex-col items-center gap-1 py-2.5">
               <Icon size={17} style={{ color: tab === id ? "#C08A3E" : "#16A34A" }} />
@@ -3795,7 +4724,7 @@ function AppInner() {
       </nav>
 
       {modalProduct !== null && (
-        <ProductModal product={modalProduct.id ? modalProduct : null} businessType={businessType} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
+        <ProductModal product={modalProduct.id ? modalProduct : null} businessType={businessType} shopId={shopId} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
       )}
 
       {pinPrompt && (
@@ -3809,7 +4738,17 @@ function AppInner() {
       )}
 
       {showDailyReport && (
-        <DailyReportModal sales={sales} products={products} expenses={expenses} onClose={() => setShowDailyReport(false)} />
+        <DailyReportModal sales={sales} products={products} expenses={expenses} gerantEmail={gerantEmail} onClose={() => setShowDailyReport(false)} />
+      )}
+
+      {endingService && currentUser && (
+        <SignaturePad
+          name={currentUser.name}
+          title="Signature de fin de service"
+          confirmLabel="Signer et terminer"
+          onSign={confirmEndSignature}
+          onCancel={() => setEndingService(false)}
+        />
       )}
     </div>
   );
@@ -3844,7 +4783,7 @@ function SplashScreen({ onDone }) {
       <div className="wuri-splash-logo">
         <Logo size={84} />
       </div>
-      <p className="wuri-splash-text mt-5 text-lg" style={{ fontFamily: "'Fraunces', serif", color: "#F0ECE3" }}>
+      <p className="wuri-splash-text mt-5 text-lg" style={{ fontFamily: "'Carlito', sans-serif", color: "#F0ECE3" }}>
         Bienvenue chez Wuri
       </p>
       <p className="wuri-splash-text mt-1 text-xs" style={{ color: "#8A6A2E" }}>
