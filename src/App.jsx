@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.6";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -921,12 +921,50 @@ function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCai
 }
 
 /* ---------- Stock ---------- */
-function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant }) {
-  const [query, setQuery] = useState("");
-  const filtered = useMemo(
-    () => products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())),
-    [products, query]
+function allCategoriesOf(categories, products) {
+  const extra = [];
+  products.forEach((p) => { if (p.category && !categories.includes(p.category) && !extra.includes(p.category)) extra.push(p.category); });
+  return [...categories, ...extra];
+}
+
+function CategoryChips({ categories, value, onChange, counts }) {
+  if (!categories.length) return null;
+  const chip = (label, val, count) => {
+    const active = value === val;
+    return (
+      <button
+        key={val}
+        onClick={() => onChange(val)}
+        className="shrink-0 px-3 py-1.5 rounded-full text-xs whitespace-nowrap"
+        style={{ background: active ? "#C08A3E" : "#F0ECE3", color: active ? "#FFFFFF" : "#1B1F1C", border: `1px solid ${active ? "#C08A3E" : "#DCD5C6"}` }}
+      >
+        {label}{count != null ? ` (${count})` : ""}
+      </button>
+    );
+  };
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+      {chip("Tout", "", counts ? counts[""] : null)}
+      {categories.map((c) => chip(c, c, counts ? counts[c] || 0 : null))}
+    </div>
   );
+}
+
+function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categories }) {
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState("");
+  const cats = useMemo(() => allCategoriesOf(categories, products), [categories, products]);
+  const counts = useMemo(() => {
+    const c = { "": products.length };
+    products.forEach((p) => { c[p.category] = (c[p.category] || 0) + 1; });
+    return c;
+  }, [products]);
+  const filtered = useMemo(
+    () => products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) && (!catFilter || p.category === catFilter)),
+    [products, query, catFilter]
+  );
+  const stockValue = (list) => list.reduce((sum, p) => sum + (Number(p.stock) || 0) * (Number(p.costPrice) || Number(p.price) || 0), 0);
+  const catValue = stockValue(filtered);
   const lowStock = products.filter((p) => p.stock <= p.threshold);
   const expiring = products.filter((p) => p.expiryDate && daysUntil(p.expiryDate) <= 7);
 
@@ -963,13 +1001,32 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant }) {
         </div>
       )}
 
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Rechercher un article…"
-        className="w-full px-4 py-2.5 rounded-lg outline-none text-sm"
-        style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
-      />
+      <div className="flex items-center gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Rechercher un article…"
+          className="flex-1 min-w-0 px-4 py-2.5 rounded-lg outline-none text-sm"
+          style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+        />
+        {isAdmin && (
+          <button
+            onClick={() => onOpenProduct({})}
+            className="hidden md:flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium shrink-0"
+            style={{ background: "#C08A3E", color: "#FFFFFF" }}
+          >
+            <Plus size={16} /> Ajouter un article
+          </button>
+        )}
+      </div>
+
+      <CategoryChips categories={cats} value={catFilter} onChange={setCatFilter} counts={counts} />
+      {isAdmin && filtered.length > 0 && (
+        <div className="flex items-center justify-between text-xs px-1" style={{ color: "#6B6558" }}>
+          <span>{catFilter || "Tous les articles"} · {filtered.length} article{filtered.length > 1 ? "s" : ""}</span>
+          <span style={{ color: "#C08A3E", fontWeight: 600 }}>Valeur du stock : {fmt(catValue)} FCFA</span>
+        </div>
+      )}
 
       <Ledger>
         {filtered.length === 0 ? (
@@ -1015,10 +1072,10 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant }) {
   );
 }
 
-function ProductModal({ product, businessType, shopId, onSave, onDelete, onClose }) {
+function ProductModal({ product, businessType, categories, shopId, onSave, onDelete, onClose }) {
   const isNew = !product?.id;
   const [form, setForm] = useState(
-    product || { id: uid(), name: "", category: BUSINESS_TYPES[businessType].categories[0], price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
+    product || { id: uid(), name: "", category: (categories && categories[0]) || BUSINESS_TYPES[businessType].categories[0], price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
   );
   const [newCodesText, setNewCodesText] = useState("");
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -1106,7 +1163,7 @@ function ProductModal({ product, businessType, shopId, onSave, onDelete, onClose
           <div>
             <label className="text-xs" style={{ color: "#6B6558" }}>Catégorie</label>
             <select value={form.category} onChange={(e) => set("category", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>
-              {BUSINESS_TYPES[businessType].categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              {allCategoriesOf(categories || BUSINESS_TYPES[businessType].categories, form.category ? [{ category: form.category }] : []).map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
 
@@ -1643,7 +1700,7 @@ function BarcodeScannerModal({ onDetect, onClose }) {
   );
 }
 
-function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, fedapayKey, shopName }) {
+function VenteTab({ categories, products, cart, setCart, onValidate, clients, onAddClient, fedapayKey, shopName }) {
   const [clientId, setClientId] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
@@ -1744,7 +1801,9 @@ function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, f
   const [query, setQuery] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanMsg, setScanMsg] = useState("");
-  const visibleProducts = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
+  const [catFilter, setCatFilter] = useState("");
+  const cats = allCategoriesOf(categories || [], products);
+  const visibleProducts = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) && (!catFilter || p.category === catFilter));
 
   const handleScanned = (code) => {
     setScannerOpen(false);
@@ -1772,6 +1831,7 @@ function VenteTab({ products, cart, setCart, onValidate, clients, onAddClient, f
           <ScanLine size={18} />
         </button>
       </div>
+      <CategoryChips categories={cats} value={catFilter} onChange={setCatFilter} />
       {scanMsg && <p className="text-xs text-center" style={{ color: "#16A34A" }}>{scanMsg}</p>}
 
       <Ledger>
@@ -2815,7 +2875,60 @@ function DevisModal({ products, clients, shopName, receiptFormat, onClose }) {
 }
 
 /* ---------- Réglages ---------- */
-function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+function CategoryManager({ categories, products, onSave, onRename }) {
+  const [newName, setNewName] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const countOf = (c) => products.filter((p) => p.category === c).length;
+  const add = () => {
+    const n = newName.trim();
+    if (!n || categories.some((c) => c.toLowerCase() === n.toLowerCase())) return;
+    onSave([...categories, n]);
+    setNewName("");
+  };
+  const commitRename = () => {
+    const n = editValue.trim();
+    if (n && n !== editing && !categories.some((c) => c.toLowerCase() === n.toLowerCase())) onRename(editing, n);
+    setEditing(null);
+  };
+  const remove = (c) => {
+    const cnt = countOf(c);
+    const msg = cnt > 0 ? `Supprimer la catégorie « ${c} » ? Les ${cnt} article(s) gardent leur catégorie mais elle n'apparaîtra plus dans la liste.` : `Supprimer la catégorie « ${c} » ?`;
+    if (window.confirm(msg)) onSave(categories.filter((x) => x !== c));
+  };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
+        <Package size={13} /> Catégories d'articles
+      </div>
+      <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+        <p className="text-xs" style={{ color: "#6B6558" }}>Crée tes propres rayons (ex. Électroménager, Carreaux, Lavabos). Ils servent de filtres dans Stock et Vente.</p>
+        {categories.map((c) => (
+          <div key={c} className="flex items-center gap-2">
+            {editing === c ? (
+              <>
+                <input autoFocus value={editValue} onChange={(e) => setEditValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && commitRename()} className="flex-1 min-w-0 px-3 py-1.5 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+                <button onClick={commitRename} className="text-xs px-2 py-1.5 rounded-md" style={{ background: "#16A34A", color: "#FFFFFF" }}>OK</button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 min-w-0 truncate text-sm" style={{ color: "#1B1F1C" }}>{c} <span className="text-xs" style={{ color: "#6B6558" }}>({countOf(c)})</span></span>
+                <button onClick={() => { setEditing(c); setEditValue(c); }} className="text-xs px-2 py-1" style={{ color: "#C08A3E" }}>Renommer</button>
+                <button onClick={() => remove(c)} className="text-xs px-2 py-1" style={{ color: "#DC4C3C" }}>Supprimer</button>
+              </>
+            )}
+          </div>
+        ))}
+        <div className="flex items-center gap-2 pt-1">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="Nouvelle catégorie…" className="flex-1 min-w-0 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+          <button onClick={add} className="px-3 py-2 rounded-md text-sm font-medium shrink-0" style={{ background: "#C08A3E", color: "#FFFFFF" }}>Ajouter</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -2984,6 +3097,8 @@ function ReglagesTab({ businessType, setBusinessType, isAdmin, currentUser, onLo
           </div>
         </div>
       )}
+
+      {isAdmin && <CategoryManager categories={categories} products={products} onSave={onSaveCategories} onRename={onRenameCategory} />}
 
       {isAdmin && (
         <div>
@@ -3854,6 +3969,12 @@ function AppInner() {
   const [sales, setSales, salesLoaded] = useShared(k("sales"), [], pendingRef, bumpSync);
   const [businessType, setBusinessType, btLoaded] = useShared(k("businessType"), null, pendingRef, bumpSync);
   const [shopName, setShopName, shopNameLoaded] = useShared(k("shopName"), "", pendingRef, bumpSync);
+  const [customCategories, setCustomCategories] = useShared(k("categories"), null, pendingRef, bumpSync);
+  const categories = Array.isArray(customCategories) ? customCategories : (businessType && BUSINESS_TYPES[businessType] ? BUSINESS_TYPES[businessType].categories : []);
+  const renameCategory = (oldName, newName) => {
+    setCustomCategories(categories.map((c) => (c === oldName ? newName : c)));
+    setProducts((ps) => ps.map((p) => (p.category === oldName ? { ...p, category: newName } : p)));
+  };
   const [adminPin, setAdminPin, pinLoaded] = useShared(k("adminPin"), null, pendingRef, bumpSync);
   const [sellers, setSellers, sellersLoaded] = useShared(k("sellers"), [], pendingRef, bumpSync);
   const [cashiers, setCashiers, cashiersLoaded] = useShared(k("cashiers"), [], pendingRef, bumpSync);
@@ -3936,20 +4057,59 @@ function AppInner() {
   useEffect(() => {
     let cancelled = false;
 
-    const publish = async () => {
-      try { await storage.set("latestAppVersion", JSON.stringify(APP_VERSION), true); } catch (e) {}
+    // Clé propre à Wuri (MTE Registre partage la même base mais a sa propre clé,
+    // sinon les deux applications se renvoient mutuellement des rechargements).
+    const VERSION_KEY = "latestAppVersion:wuri";
+    // Compare deux numéros de version "3.4" vs "3.10" : > 0 si a est plus récent que b.
+    const cmpVersion = (a, b) => {
+      const pa = String(a).split(".").map((n) => parseInt(n, 10) || 0);
+      const pb = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] || 0) - (pb[i] || 0);
+        if (d !== 0) return d;
+      }
+      return 0;
     };
-    publish();
 
-    const checkForUpdate = async () => {
+    // Ne publie que si cette version est plus récente que celle déjà annoncée :
+    // un vieil appareil resté sur une ancienne version ne peut plus "faire reculer" les autres.
+    const publish = async () => {
       try {
-        const res = await storage.get("latestAppVersion", true);
-        const latest = res ? JSON.parse(res.value) : null;
-        if (!cancelled && latest && latest !== APP_VERSION) {
-          window.location.reload();
+        const res = await storage.get(VERSION_KEY, true);
+        const current = res ? JSON.parse(res.value) : null;
+        if (!current || cmpVersion(APP_VERSION, current) > 0) {
+          await storage.set(VERSION_KEY, JSON.stringify(APP_VERSION), true);
         }
       } catch (e) {}
     };
+    publish();
+
+    // Vide le cache de l'application (service worker) avant de recharger, sinon
+    // le rechargement ressert l'ancienne version depuis le cache du téléphone.
+    const hardReload = async () => {
+      try {
+        if ("serviceWorker" in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+        if (window.caches) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch (e) {}
+      window.location.reload();
+    };
+
+    const checkForUpdate = async () => {
+      try {
+        const res = await storage.get(VERSION_KEY, true);
+        const latest = res ? JSON.parse(res.value) : null;
+        if (!cancelled && latest && cmpVersion(latest, APP_VERSION) > 0) {
+          hardReload();
+        }
+      } catch (e) {}
+    };
+    checkForUpdate();
 
     const interval = setInterval(checkForUpdate, 45000);
     return () => { cancelled = true; clearInterval(interval); };
@@ -4635,8 +4795,8 @@ function AppInner() {
       )}
 
       <main className="max-w-lg md:max-w-3xl mx-auto px-4 pb-4">
-        {tab === "stock" && <StockTab products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
-        {tab === "vente" && <VenteTab products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} />}
+        {tab === "stock" && <StockTab categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
+        {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} />}
         {tab === "clients" && <ClientsTab clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
         {tab === "inventaire" && <InventaireTab products={products} isAdmin={isAdmin} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
         {tab === "historique" && <HistoriqueTab sales={sales} />}
@@ -4657,6 +4817,9 @@ function AppInner() {
         {tab === "dashboard" && isAdmin && <DashboardTab sales={sales} products={products} />}
         {tab === "reglages" && (
           <ReglagesTab
+            categories={categories}
+            onSaveCategories={setCustomCategories}
+            onRenameCategory={renameCategory}
             businessType={businessType}
             setBusinessType={setBusinessType}
             isAdmin={isAdmin}
@@ -4724,7 +4887,7 @@ function AppInner() {
       </nav>
 
       {modalProduct !== null && (
-        <ProductModal product={modalProduct.id ? modalProduct : null} businessType={businessType} shopId={shopId} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
+        <ProductModal product={modalProduct.id ? modalProduct : null} categories={categories} businessType={businessType} shopId={shopId} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
       )}
 
       {pinPrompt && (
