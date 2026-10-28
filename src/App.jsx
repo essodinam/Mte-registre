@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.6";
+const APP_VERSION = "3.7";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -515,6 +515,35 @@ function DevPanel({ onOpenShop, onClose }) {
   const [editDateValue, setEditDateValue] = useState("");
   const [shopStats, setShopStats] = useState({}); // code -> { total, count, lastActivity }
   const [sortBy, setSortBy] = useState("recent"); // 'recent' | 'revenue'
+  const [busyMsg, setBusyMsg] = useState("");
+
+  const deleteShop = async (s) => {
+    const typed = window.prompt(`Suppression DÉFINITIVE du commerce ${s.code} : articles, ventes, personnel, photos... tout sera effacé.\n\nPense à faire « Export » avant.\nPour confirmer, tape le code du commerce :`);
+    if (!typed || typed.trim().toUpperCase() !== String(s.code).toUpperCase()) { if (typed !== null) window.alert("Code différent : suppression annulée."); return; }
+    setBusyMsg(`Suppression de ${s.code}…`);
+    try {
+      await storage.deleteShopData(s.code);
+      const next = shops.filter((x) => x.code !== s.code);
+      await storage.set(SHOPS_REGISTRY_KEY, JSON.stringify(next), true);
+      setShops(next);
+      setBusyMsg(`✓ ${s.code} supprimé.`);
+    } catch (e) {
+      setBusyMsg("Échec de la suppression : " + (e?.message || "erreur inconnue"));
+    }
+  };
+
+  const cleanDemos = async () => {
+    setBusyMsg("Recherche des démos…");
+    try {
+      const codes = await storage.listCodesWithPrefix(DEMO_PREFIX);
+      const withTest = [...codes, TEST_SHOP_CODE];
+      if (!window.confirm(`Supprimer définitivement ${codes.length} démo(s) et les données du mode test ?`)) { setBusyMsg(""); return; }
+      for (const c of withTest) await storage.deleteShopData(c);
+      setBusyMsg(`✓ ${codes.length} démo(s) et le mode test nettoyés.`);
+    } catch (e) {
+      setBusyMsg("Échec du nettoyage : " + (e?.message || "erreur inconnue"));
+    }
+  };
 
   const handlePin = async (pin) => {
     if (pin !== DEV_ACCESS_PIN) { setError("Code incorrect."); return; }
@@ -637,6 +666,10 @@ function DevPanel({ onOpenShop, onClose }) {
           </span>
           <span style={{ color: "#16A34A" }} className="text-xs">Mode test</span>
         </button>
+        <button onClick={cleanDemos} className="mx-auto block text-[11px] px-3 py-1.5 rounded-full" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#6B6558" }}>
+          🧹 Nettoyer les démos et le mode test
+        </button>
+        {busyMsg && <p className="text-xs text-center" style={{ color: busyMsg.startsWith("Échec") ? "#DC4C3C" : "#16A34A" }}>{busyMsg}</p>}
         {loadError && <p className="text-xs" style={{ color: "#DC4C3C" }}>{loadError}</p>}
         {shops && shops.length === 0 && !loadError && (
           <p className="text-xs" style={{ color: "#6B6558" }}>Aucun commerce enregistré pour l'instant.</p>
@@ -686,6 +719,9 @@ function DevPanel({ onOpenShop, onClose }) {
                   <div className="flex items-center gap-2">
                     <button onClick={() => exportShopData(s.code)} className="text-[11px] px-2 py-1 rounded" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#6B6558" }}>
                       Export
+                    </button>
+                    <button onClick={() => deleteShop(s)} className="text-[11px] px-2 py-1 rounded" style={{ background: "#DC4C3C1A", color: "#DC4C3C" }}>
+                      Supprimer
                     </button>
                     <button onClick={() => extendOneMonth(s)} className="text-[11px] px-2 py-1 rounded" style={{ background: "#16A34A1A", color: "#16A34A" }}>
                       +1 mois
