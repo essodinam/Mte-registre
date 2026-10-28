@@ -133,6 +133,39 @@ async function deletePhoto(url) {
   }
 }
 
+/**
+ * Suppression complète d'un commerce (réservée au panneau développeur) :
+ * toutes les lignes "nom:CODE" de la base + le dossier de photos du commerce.
+ */
+function assertShopCode(code) {
+  if (!/^[A-Za-z0-9-]+$/.test(code || "")) throw new Error("Code de commerce invalide.");
+}
+
+async function deleteShopData(code) {
+  requireSupabase();
+  assertShopCode(code);
+  const { error } = await supabase.from("kv_store").delete().like("key", `%:${code}`);
+  if (error) throw error;
+  try {
+    const { data: files } = await supabase.storage.from(PHOTOS_BUCKET).list(code, { limit: 1000 });
+    if (files && files.length) await supabase.storage.from(PHOTOS_BUCKET).remove(files.map((f) => `${code}/${f.name}`));
+  } catch (e) {
+    // Le nettoyage des photos n'est pas bloquant.
+  }
+}
+
+async function listCodesWithPrefix(prefix) {
+  requireSupabase();
+  const { data, error } = await supabase.from("kv_store").select("key").like("key", `%:${prefix}%`).limit(5000);
+  if (error) throw error;
+  const codes = new Set();
+  (data || []).forEach((r) => {
+    const code = r.key.slice(r.key.lastIndexOf(":") + 1);
+    if (code.startsWith(prefix)) codes.add(code);
+  });
+  return [...codes];
+}
+
 export const storage = {
   get,
   set,
@@ -141,4 +174,6 @@ export const storage = {
   deleteProductPhoto: deletePhoto,
   uploadShopLogo,
   deleteShopLogo: deletePhoto,
+  deleteShopData,
+  listCodesWithPrefix,
 };
