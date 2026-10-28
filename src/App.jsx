@@ -30,12 +30,12 @@ const BUSINESS_TYPES = {
    de Moïse Tech Énergie) qui le communique, une fois que tu as fait la démo et
    que le commerçant a confirmé vouloir s'abonner. Change cette valeur quand tu veux.
 ------------------------------------------------------------------- */
-const OWNER_ACCESS_PIN = "0635Lemon@";
+const OWNER_ACCESS_PIN = "0635LEMON@n2026";
 
 /* ---------- Espace développeur : voir tous les commerces créés ----------
    Code séparé du PIN gérant ci-dessus. Change-le aussi quand tu veux.
 ------------------------------------------------------------------- */
-const DEV_ACCESS_PIN = "0635DevMTE@";
+const DEV_ACCESS_PIN = "0635DevMTE@2026";
 const SHOPS_REGISTRY_KEY = "shops_registry";
 const TEST_SHOP_CODE = "TEST-MTE-DEV"; // commerce factice, réservé au développeur, jamais visible des clients
 const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le registre public, jamais bloqués par l'abonnement
