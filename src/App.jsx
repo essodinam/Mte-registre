@@ -3530,7 +3530,7 @@ function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessT
                 const text = low.length === 0
                   ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                   : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
-                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+                window.open(`https://wa.me/22891280815?text=${encodeURIComponent(text)}`, "_blank");
               }}
               className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
               style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#DC4C3C" }}
