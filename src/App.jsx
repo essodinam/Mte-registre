@@ -30,14 +30,13 @@ const BUSINESS_TYPES = {
    de Moïse Tech Énergie) qui le communique, une fois que tu as fait la démo et
    que le commerçant a confirmé vouloir s'abonner. Change cette valeur quand tu veux.
 ------------------------------------------------------------------- */
-const OWNER_ACCESS_PIN = "0635LEMON@n2026";
 
 /* ---------- Espace développeur : voir tous les commerces créés ----------
    Code séparé du PIN gérant ci-dessus. Change-le aussi quand tu veux.
 ------------------------------------------------------------------- */
-const DEV_ACCESS_PIN = "0635DevMTE@2026";
 const SHOPS_REGISTRY_KEY = "shops_registry";
 const TEST_SHOP_CODE = "TEST-MTE-DEV"; // commerce factice, réservé au développeur, jamais visible des clients
+const DEMO_TTL_MS = 24 * 3600 * 1000; // une démo vit 24 h, puis ses données sont supprimées
 const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le registre public, jamais bloqués par l'abonnement
 
 /* ---------- Version de l'application ----------
@@ -46,12 +45,51 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.7";
+const APP_VERSION = "3.9.5";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
 const daysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date()) / 86400000);
 // Durée en "Xh Ymin", utilisée pour afficher le temps de service travaillé.
+/* ---------- Codes : empreintes SHA-256 (les codes ne sont plus stockés en clair) ---------- */
+async function sha256hex(str) {
+  if (!(window.crypto && window.crypto.subtle)) throw new Error("no-subtle");
+  const buf = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// Les opérations sensibles passent par le serveur protégé /api/admin (la clé secrète n'est jamais dans l'application).
+async function adminCall(action, auth, extra = {}) {
+  const credentials = auth && typeof auth === "object" ? { token: auth.token } : auth ? { code: auth } : {};
+  let r;
+  try {
+    r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...credentials, ...extra }) });
+  } catch (e) { throw Object.assign(new Error("Pas de connexion au serveur."), { status: 0 }); }
+  let data = null;
+  try { data = await r.json(); } catch (e) {}
+  if (!data) throw Object.assign(new Error("Serveur d'administration introuvable : le dossier api n'est pas encore déployé."), { status: r.status });
+  if (!r.ok) throw Object.assign(new Error(data.error || "Erreur serveur"), { status: r.status });
+  return data;
+}
+// Code à 4 chiffres d'une personne : stocké sous la forme "h1:<empreinte>" (salé par commerce + personne).
+async function hashPin(pin, salt) {
+  try { return "h1:" + (await sha256hex(`wuri-pin:${salt}:${pin}`)); } catch (e) { return pin; }
+}
+async function pinMatches(entered, stored, salt) {
+  if (stored == null || stored === "") return false;
+  if (String(stored).startsWith("h1:")) return (await hashPin(entered, salt)) === stored;
+  return String(entered) === String(stored); // ancien format (en clair) : remplacé par l'empreinte après une connexion réussie
+}
+
+const round3 = (n) => Math.round(n * 1000) / 1000;
+const DEFAULT_DEPOTS = ["Magasin principal"];
+
+const waNumber = (phone) => {
+  let d = String(phone || "").replace(/\D/g, "");
+  if (d.startsWith("00")) d = d.slice(2);
+  if (d.length === 8) d = "228" + d; // numéro togolais sans indicatif
+  return d;
+};
+
 const formatDuration = (ms) => {
   const totalMin = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(totalMin / 60);
@@ -128,6 +166,49 @@ async function verifyBiometric(credentialId) {
     },
   });
   return !!assertion;
+}
+/* ---------- Empreinte pour les accès développeur / propriétaire (vérifiée par le serveur) ---------- */
+const b64u = (buf) => b64encode(buf).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64uBytes = (s) => b64decode(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
+const adminBioLocal = (role) => { try { return localStorage.getItem(`wuri-adminbio:${role}`); } catch (e) { return null; } };
+async function adminBioRegister(role, auth) {
+  const { pack } = await adminCall("bioRegisterOptions", auth, { role });
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: b64uBytes(pack.challenge),
+      rp: { name: "WURI CENTER", id: window.location.hostname },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: `wuri-${role}`, displayName: role === "dev" ? "Développeur" : "Propriétaire" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
+      timeout: 60000,
+      attestation: "none",
+    },
+  });
+  const pk = cred && cred.response.getPublicKey && cred.response.getPublicKey();
+  if (!pk) throw new Error("Ce téléphone ne permet pas cette protection.");
+  const credentialId = b64u(cred.rawId);
+  await adminCall("bioRegister", auth, { role, pack, credentialId, clientDataJSON: b64u(cred.response.clientDataJSON), publicKey: b64u(pk) });
+  try { localStorage.setItem(`wuri-adminbio:${role}`, credentialId); } catch (e) {}
+}
+async function adminBioLogin(role) {
+  const id = adminBioLocal(role);
+  if (!id) throw new Error("Empreinte non activée sur ce téléphone.");
+  const { pack } = await adminCall("bioOptions", null, { role });
+  const a = await navigator.credentials.get({
+    publicKey: {
+      challenge: b64uBytes(pack.challenge),
+      rpId: window.location.hostname,
+      allowCredentials: [{ id: b64uBytes(id), type: "public-key" }],
+      userVerification: "required",
+      timeout: 60000,
+    },
+  });
+  if (!a) throw new Error("Empreinte annulée.");
+  const r = await adminCall("bioLogin", null, {
+    role, pack, credentialId: b64u(a.rawId),
+    clientDataJSON: b64u(a.response.clientDataJSON), authenticatorData: b64u(a.response.authenticatorData), signature: b64u(a.response.signature),
+  });
+  return { token: r.token };
 }
 // Met un numéro togolais (ou autre) au format attendu par wa.me (indicatif sans +, sans espaces).
 const waPhone = (phone) => {
@@ -340,7 +421,7 @@ function PinPad({ title, subtitle, onSubmit, onCancel, error }) {
 }
 
 /* ---------- Portail mot de passe libre (ex : Espace gérant) ---------- */
-function PasswordGate({ title, subtitle, onSubmit, onCancel, error }) {
+function PasswordGate({ title, subtitle, onSubmit, onCancel, error, onBio }) {
   const [value, setValue] = useState("");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#00000099" }} onClick={onCancel}>
@@ -368,6 +449,11 @@ function PasswordGate({ title, subtitle, onSubmit, onCancel, error }) {
         >
           Valider
         </button>
+        {onBio && (
+          <button onClick={onBio} className="w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2" style={{ background: "#F0ECE3", color: "#1B1F1C", border: "1px solid #C08A3E" }}>
+            <ScanLine size={16} style={{ color: "#C08A3E" }} /> Utiliser l'empreinte
+          </button>
+        )}
         <button onClick={onCancel} className="text-xs" style={{ color: "#6B6558" }}>Annuler</button>
       </div>
     </div>
@@ -516,15 +602,15 @@ function DevPanel({ onOpenShop, onClose }) {
   const [shopStats, setShopStats] = useState({}); // code -> { total, count, lastActivity }
   const [sortBy, setSortBy] = useState("recent"); // 'recent' | 'revenue'
   const [busyMsg, setBusyMsg] = useState("");
+  const codeRef = useRef("");
 
   const deleteShop = async (s) => {
     const typed = window.prompt(`Suppression DÉFINITIVE du commerce ${s.code} : articles, ventes, personnel, photos... tout sera effacé.\n\nPense à faire « Export » avant.\nPour confirmer, tape le code du commerce :`);
     if (!typed || typed.trim().toUpperCase() !== String(s.code).toUpperCase()) { if (typed !== null) window.alert("Code différent : suppression annulée."); return; }
     setBusyMsg(`Suppression de ${s.code}…`);
     try {
-      await storage.deleteShopData(s.code);
+      await adminCall("deleteShop", codeRef.current, { target: s.code });
       const next = shops.filter((x) => x.code !== s.code);
-      await storage.set(SHOPS_REGISTRY_KEY, JSON.stringify(next), true);
       setShops(next);
       setBusyMsg(`✓ ${s.code} supprimé.`);
     } catch (e) {
@@ -535,46 +621,45 @@ function DevPanel({ onOpenShop, onClose }) {
   const cleanDemos = async () => {
     setBusyMsg("Recherche des démos…");
     try {
-      const codes = await storage.listCodesWithPrefix(DEMO_PREFIX);
-      const withTest = [...codes, TEST_SHOP_CODE];
+      const { codes } = await adminCall("listDemos", codeRef.current);
       if (!window.confirm(`Supprimer définitivement ${codes.length} démo(s) et les données du mode test ?`)) { setBusyMsg(""); return; }
-      for (const c of withTest) await storage.deleteShopData(c);
+      await adminCall("cleanDemos", codeRef.current);
+      setShops((cur) => (cur ? cur.filter((x) => !String(x.code).startsWith(DEMO_PREFIX) && x.code !== TEST_SHOP_CODE) : cur));
       setBusyMsg(`✓ ${codes.length} démo(s) et le mode test nettoyés.`);
     } catch (e) {
       setBusyMsg("Échec du nettoyage : " + (e?.message || "erreur inconnue"));
     }
   };
 
-  const handlePin = async (pin) => {
-    if (pin !== DEV_ACCESS_PIN) { setError("Code incorrect."); return; }
-    setGate(false);
-    setError("");
+  const [bioTick, setBioTick] = useState(0);
+  const enter = async (auth) => {
     try {
-      const res = await storage.get(SHOPS_REGISTRY_KEY, true);
-      const list = res ? JSON.parse(res.value) : [];
+      const data = await adminCall("list", auth);
+      codeRef.current = auth;
+      const list = [...(data.shops || [])];
       list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
       setShops(list);
-      // Compare l'activité de chaque commerce : total vendu, nombre de ventes,
-      // dernière activité — pour repérer en un coup d'œil ceux qui tournent bien.
-      const stats = {};
-      await Promise.all(list.map(async (s) => {
-        try {
-          const res2 = await storage.get(`sales:${s.code}`, true);
-          const sales = res2 ? JSON.parse(res2.value) : [];
-          stats[s.code] = {
-            total: sales.reduce((sum, v) => sum + v.total, 0),
-            count: sales.length,
-            lastActivity: sales.length ? Math.max(...sales.map((v) => v.date)) : null,
-          };
-        } catch (e) {
-          stats[s.code] = { total: 0, count: 0, lastActivity: null };
-        }
-      }));
-      setShopStats(stats);
+      setShopStats(data.stats || {});
+      setGate(false);
+      setError("");
     } catch (e) {
-      setLoadError("Impossible de charger la liste des commerces.");
-      setShops([]);
+      setError(e.status === 401 || e.status === 429 ? e.message : "Connexion impossible : " + e.message);
     }
+  };
+  const handlePin = (pin) => enter(pin);
+  const handleBio = async () => {
+    try { await enter(await adminBioLogin("dev")); }
+    catch (e) { setError(e.message || "Empreinte refusée."); }
+  };
+  const enableBio = async () => {
+    setBusyMsg("Place ton doigt sur le capteur…");
+    try { await adminBioRegister("dev", codeRef.current); setBioTick((n) => n + 1); setBusyMsg("✓ Empreinte activée sur ce téléphone."); }
+    catch (e) { setBusyMsg("Échec de l'activation : " + (e?.message || "annulé")); }
+  };
+  const revokeBio = async () => {
+    if (!window.confirm("Retirer l'empreinte de TOUS les téléphones développeur ? Le code restera valable.")) return;
+    try { await adminCall("bioRevoke", codeRef.current, { role: "dev" }); try { localStorage.removeItem("wuri-adminbio:dev"); } catch (e) {} setBioTick((n) => n + 1); setBusyMsg("✓ Empreintes développeur retirées."); }
+    catch (e) { setBusyMsg("Échec : " + e.message); }
   };
 
   const saveSubscription = async (code, dateValue) => {
@@ -583,8 +668,8 @@ function DevPanel({ onOpenShop, onClose }) {
     setShops(next);
     setEditingCode(null);
     try {
-      await storage.set(SHOPS_REGISTRY_KEY, JSON.stringify(next), true);
-    } catch (e) {}
+      await adminCall("setSubscription", codeRef.current, { target: code, until: iso });
+    } catch (e) { setBusyMsg("Échec de l'enregistrement : " + e.message); }
   };
 
   const extendOneMonth = (s) => {
@@ -594,16 +679,9 @@ function DevPanel({ onOpenShop, onClose }) {
   };
 
   const exportShopData = async (code) => {
-    const keys = ["products", "sales", "businessType", "shopName", "sellers", "cashiers", "clients", "hours", "shifts", "expenses"];
-    const data = { code, exportedAt: new Date().toISOString() };
-    for (const name of keys) {
-      try {
-        const res = await storage.get(`${name}:${code}`, true);
-        data[name] = res ? JSON.parse(res.value) : null;
-      } catch (e) {
-        data[name] = null;
-      }
-    }
+    let data;
+    try { ({ data } = await adminCall("export", codeRef.current, { target: code })); }
+    catch (e) { setBusyMsg("Échec de l'export : " + e.message); return; }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -619,6 +697,7 @@ function DevPanel({ onOpenShop, onClose }) {
         title="Code développeur"
         subtitle="Réservé au concepteur de l'application"
         onSubmit={handlePin}
+        onBio={BIOMETRIC_SUPPORTED && adminBioLocal("dev") ? handleBio : null}
         onCancel={onClose}
         error={error}
       />
@@ -669,6 +748,16 @@ function DevPanel({ onOpenShop, onClose }) {
         <button onClick={cleanDemos} className="mx-auto block text-[11px] px-3 py-1.5 rounded-full" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#6B6558" }}>
           🧹 Nettoyer les démos et le mode test
         </button>
+        {BIOMETRIC_SUPPORTED && (
+          <div className="flex gap-2 justify-center text-xs" data-tick={bioTick}>
+            {!adminBioLocal("dev") && typeof codeRef.current === "string" && (
+              <button onClick={enableBio} className="px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ border: "1px solid #C08A3E", color: "#1B1F1C" }}><ScanLine size={13} style={{ color: "#C08A3E" }} /> Activer l'empreinte ici</button>
+            )}
+            {typeof codeRef.current === "string" && (
+              <button onClick={revokeBio} className="px-3 py-1.5 rounded-lg" style={{ border: "1px solid #DCD5C6", color: "#6B6558" }}>Retirer les empreintes</button>
+            )}
+          </div>
+        )}
         {busyMsg && <p className="text-xs text-center" style={{ color: busyMsg.startsWith("Échec") ? "#DC4C3C" : "#16A34A" }}>{busyMsg}</p>}
         {loadError && <p className="text-xs" style={{ color: "#DC4C3C" }}>{loadError}</p>}
         {shops && shops.length === 0 && !loadError && (
@@ -755,21 +844,34 @@ function DevPanel({ onOpenShop, onClose }) {
 }
 
 /* ---------- Écran d'accueil ---------- */
-function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
+function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget }) {
   const [mode, setMode] = useState(null); // null | 'join'
   const [code, setCode] = useState("");
   const [ownerGate, setOwnerGate] = useState(false);
   const [ownerError, setOwnerError] = useState("");
   const [devPanel, setDevPanel] = useState(false);
 
-  const handleOwnerPin = (pin) => {
-    if (pin === OWNER_ACCESS_PIN) {
+  const handleOwnerPin = async (pin) => {
+    try {
+      await adminCall("verifyOwner", pin);
+      setOwnerGate(false);
+      setOwnerError("");
+      if (BIOMETRIC_SUPPORTED && !adminBioLocal("owner") && window.confirm("Activer l'empreinte sur ce téléphone pour ne plus taper ce code ?")) {
+        try { await adminBioRegister("owner", pin); } catch (e) { window.alert("Empreinte non activée : " + (e?.message || "annulé")); }
+      }
+      onCreate();
+    } catch (e) {
+      setOwnerError(e.status === 401 || e.status === 429 ? e.message : "Connexion impossible : " + e.message);
+    }
+  };
+  const handleOwnerBio = async () => {
+    try {
+      const auth = await adminBioLogin("owner");
+      await adminCall("verifyOwner", auth);
       setOwnerGate(false);
       setOwnerError("");
       onCreate();
-    } else {
-      setOwnerError("Code incorrect.");
-    }
+    } catch (e) { setOwnerError(e?.message || "Empreinte refusée."); }
   };
 
   if (mode === "join") {
@@ -778,7 +880,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={56} />
-            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Code de ton commerce</p>
           </div>
           <input
@@ -808,7 +910,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
         <CategoryShowcase />
         <div className="text-center">
           <Logo size={60} />
-          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Bienvenue</p>
         </div>
         {knownShops && knownShops.length > 0 && (
@@ -816,15 +918,24 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
             <p className="text-xs uppercase tracking-wide mb-1.5 px-1" style={{ color: "#6B6558" }}>Mes commerces sur cet appareil</p>
             <div className="space-y-1.5">
               {knownShops.map((s) => (
-                <button
-                  key={s.code}
-                  onClick={() => onJoin(s.code)}
-                  className="w-full px-3 py-2.5 rounded-lg text-left flex items-center justify-between text-sm"
-                  style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
-                >
-                  <span className="flex items-center gap-2"><Repeat size={13} style={{ color: "#C08A3E" }} /> {s.label || s.code}</span>
-                  <span className="text-xs" style={{ color: "#6B6558", fontFamily: "'Carlito', sans-serif" }}>{s.code}</span>
-                </button>
+                <div key={s.code} className="relative">
+                  <button
+                    onClick={() => onJoin(s.code)}
+                    className="w-full pl-3 pr-10 py-2.5 rounded-lg text-left flex items-center justify-between text-sm"
+                    style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+                  >
+                    <span className="flex items-center gap-2"><Repeat size={13} style={{ color: "#C08A3E" }} /> {s.label || s.code}</span>
+                    <span className="text-xs" style={{ color: "#6B6558", fontFamily: "'Carlito', sans-serif" }}>{s.code}</span>
+                  </button>
+                  <button
+                    onClick={() => { if (window.confirm(`Retirer « ${s.label || s.code} » de la liste de cet appareil ? Les données du commerce ne sont pas supprimées.`)) onForget(s.code); }}
+                    aria-label="Retirer de la liste"
+                    className="absolute top-1/2 right-2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center"
+                    style={{ color: "#6B6558" }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -843,7 +954,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
         </button>
         {onDemo && (
           <button onClick={onDemo} className="w-full text-center text-xs flex items-center justify-center gap-1.5" style={{ color: "#6B6558" }}>
-            <Sparkles size={12} /> Essayer une démo (données fictives, code gérant 0000)
+            <Sparkles size={12} /> Essayer une démo (données fictives, code gérant 0000, valable 24 h)
           </button>
         )}
         <div className="flex justify-center pt-2">
@@ -862,6 +973,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops }) {
           title="Mot de passe gérant"
           subtitle="Ce code t'est réservé, communique-le au commerçant une fois son abonnement confirmé"
           onSubmit={handleOwnerPin}
+          onBio={BIOMETRIC_SUPPORTED && adminBioLocal("owner") ? handleOwnerBio : null}
           onCancel={() => { setOwnerGate(false); setOwnerError(""); }}
           error={ownerError}
         />
@@ -909,7 +1021,7 @@ function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCai
         )}
         <div className="text-center">
           <Logo size={56} />
-          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Qui utilise l'application ?</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -986,9 +1098,17 @@ function CategoryChips({ categories, value, onChange, counts }) {
   );
 }
 
-function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categories }) {
+function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, categories, depots }) {
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState("");
+  const [depotFilter, setDepotFilter] = useState("");
+  const depotOf = (p) => p.depot || depots[0];
+  const depotsAll = useMemo(() => allCategoriesOf(depots, products.map((p) => ({ category: depotOf(p) }))), [depots, products]);
+  const depotCounts = useMemo(() => {
+    const c = { "": products.length };
+    products.forEach((p) => { const d = p.depot || depots[0]; c[d] = (c[d] || 0) + 1; });
+    return c;
+  }, [products, depots]);
   const cats = useMemo(() => allCategoriesOf(categories, products), [categories, products]);
   const counts = useMemo(() => {
     const c = { "": products.length };
@@ -996,8 +1116,8 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categorie
     return c;
   }, [products]);
   const filtered = useMemo(
-    () => products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) && (!catFilter || p.category === catFilter)),
-    [products, query, catFilter]
+    () => products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) && (!catFilter || p.category === catFilter) && (!depotFilter || depotOf(p) === depotFilter)),
+    [products, query, catFilter, depotFilter]
   );
   const stockValue = (list) => list.reduce((sum, p) => sum + (Number(p.stock) || 0) * (Number(p.costPrice) || Number(p.price) || 0), 0);
   const catValue = stockValue(filtered);
@@ -1045,7 +1165,7 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categorie
           className="flex-1 min-w-0 px-4 py-2.5 rounded-lg outline-none text-sm"
           style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
         />
-        {isAdmin && (
+        {canEdit && (
           <button
             onClick={() => onOpenProduct({})}
             className="hidden md:flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium shrink-0"
@@ -1056,6 +1176,7 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categorie
         )}
       </div>
 
+      {depotsAll.length > 1 && <CategoryChips categories={depotsAll} value={depotFilter} onChange={setDepotFilter} counts={depotCounts} />}
       <CategoryChips categories={cats} value={catFilter} onChange={setCatFilter} counts={counts} />
       {isAdmin && filtered.length > 0 && (
         <div className="flex items-center justify-between text-xs px-1" style={{ color: "#6B6558" }}>
@@ -1067,12 +1188,12 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categorie
       <Ledger>
         {filtered.length === 0 ? (
           <div className="py-10 text-center text-sm" style={{ color: "#16A34A99" }}>
-            Aucun article. {isAdmin ? "Ajoute ton premier produit avec le bouton +." : "Le gérant n'a pas encore ajouté d'articles."}
+            Aucun article. {canEdit ? "Ajoute ton premier produit avec le bouton +." : "Le gérant n'a pas encore ajouté d'articles."}
           </div>
         ) : (
           filtered.map((p, i) => (
             <Row key={p.id} n={i + 1}>
-              <button onClick={() => isAdmin && onOpenProduct(p)} className="flex-1 flex items-center justify-between text-left">
+              <button onClick={() => canEdit && onOpenProduct(p)} className="flex-1 flex items-center justify-between text-left">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-9 h-9 rounded-md overflow-hidden flex items-center justify-center shrink-0" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
                     {p.photoUrl ? <img src={p.photoUrl} alt="" className="w-full h-full object-cover" /> : <Package size={15} style={{ color: "#DCD5C6" }} />}
@@ -1082,7 +1203,7 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categorie
                       {p.name}
                       {p.hasCodes && <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#C08A3E22", color: "#C08A3E" }}>🔑 codes</span>}
                     </div>
-                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.category}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.category}{depotsAll.length > 1 ? ` · ${depotOf(p)}` : ""}</div>
                   </div>
                 </div>
                 <div className="text-right">
@@ -1099,19 +1220,19 @@ function StockTab({ products, isAdmin, onOpenProduct, onRequestGerant, categorie
         )}
       </Ledger>
 
-      {!isAdmin && (
+      {!canEdit && (
         <button onClick={onRequestGerant} className="w-full flex items-center justify-center gap-2 text-xs py-2" style={{ color: "#16A34A" }}>
-          <Lock size={12} /> Ajout et modification réservés au gérant
+          <Lock size={12} /> Ajout et modification réservés au gérant et au magasinier
         </button>
       )}
     </div>
   );
 }
 
-function ProductModal({ product, businessType, categories, shopId, onSave, onDelete, onClose }) {
+function ProductModal({ product, businessType, categories, depots, canDelete, shopId, onSave, onDelete, onClose }) {
   const isNew = !product?.id;
   const [form, setForm] = useState(
-    product || { id: uid(), name: "", category: (categories && categories[0]) || BUSINESS_TYPES[businessType].categories[0], price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
+    product || { id: uid(), name: "", category: (categories && categories[0]) || BUSINESS_TYPES[businessType].categories[0], depot: (depots && depots[0]) || "", decimal: false, wholesalePrice: "", price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
   );
   const [newCodesText, setNewCodesText] = useState("");
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -1203,16 +1324,37 @@ function ProductModal({ product, businessType, categories, shopId, onSave, onDel
             </select>
           </div>
 
+          {depots && depots.length > 1 && (
+            <div>
+              <label className="text-xs" style={{ color: "#6B6558" }}>Dépôt / magasin</label>
+              <select value={form.depot || depots[0]} onChange={(e) => set("depot", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>
+                {allCategoriesOf(depots, form.depot ? [{ category: form.depot }] : []).map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs" style={{ color: "#6B6558" }}>Prix de vente (FCFA)</label>
               <input type="number" value={form.price} onChange={(e) => set("price", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
             </div>
+            {canDelete && (
             <div>
               <label className="text-xs" style={{ color: "#6B6558" }}>Prix d'achat (optionnel)</label>
               <input type="number" value={form.costPrice ?? ""} onChange={(e) => set("costPrice", e.target.value)} placeholder="Pour calculer la marge" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
             </div>
+            )}
           </div>
+
+          <div>
+            <label className="text-xs" style={{ color: "#6B6558" }}>Prix de gros (optionnel)</label>
+            <input type="number" value={form.wholesalePrice ?? ""} onChange={(e) => set("wholesalePrice", e.target.value)} placeholder="Prix pour les achats en gros" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+          </div>
+
+          <label className="flex items-center gap-2.5 py-1 cursor-pointer select-none">
+            <input type="checkbox" checked={!!form.decimal} onChange={(e) => set("decimal", e.target.checked)} className="w-4 h-4" />
+            <span className="text-sm" style={{ color: "#1B1F1C" }}>Vendu au détail (quantités avec virgule : 2,5 m, 0,5 kg…)</span>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1277,7 +1419,7 @@ function ProductModal({ product, businessType, categories, shopId, onSave, onDel
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs" style={{ color: "#6B6558" }}>Quantité en stock</label>
-                <input type="number" value={form.stock} onChange={(e) => set("stock", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
+                <input type="number" step={form.decimal ? "any" : undefined} value={form.stock} onChange={(e) => set("stock", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} />
               </div>
               <div>
                 <label className="text-xs" style={{ color: "#6B6558" }}>Seuil d'alerte</label>
@@ -1288,14 +1430,14 @@ function ProductModal({ product, businessType, categories, shopId, onSave, onDel
         </div>
 
         <div className="flex gap-2 pt-2">
-          {!isNew && (
+          {!isNew && canDelete && (
             <button onClick={() => onDelete(form.id)} className="px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm" style={{ background: "#DC4C3C1A", color: "#DC4C3C", border: "1px solid #DC4C3C55" }}>
               <Trash2 size={16} /> Supprimer
             </button>
           )}
           <button
             disabled={!valid}
-            onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, costPrice: form.costPrice === "" || form.costPrice == null ? null : parseFloat(form.costPrice) || 0, stock: form.hasCodes ? unusedCount : (parseInt(form.stock) || 0), threshold: parseInt(form.threshold) || 0, unit: form.hasCodes ? "code" : form.unit })}
+            onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, costPrice: form.costPrice === "" || form.costPrice == null ? null : parseFloat(form.costPrice) || 0, stock: form.hasCodes ? unusedCount : (form.decimal ? round3(parseFloat(form.stock) || 0) : (parseInt(form.stock) || 0)), wholesalePrice: form.wholesalePrice === "" || form.wholesalePrice == null ? null : parseFloat(form.wholesalePrice) || null, depot: form.depot || (depots && depots[0]) || "", threshold: form.decimal ? (parseFloat(form.threshold) || 0) : (parseInt(form.threshold) || 0), unit: form.hasCodes ? "code" : form.unit })}
             className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
             style={{ background: "#C08A3E", color: "#F0ECE3" }}
           >
@@ -1555,7 +1697,7 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
   );
 }
 
-function ClientsTab({ clients, sales, isAdmin, onAddClient, onUpdateClient, onRemoveClient, onRecordPayment, loyaltyRate }) {
+function ClientsTab({ shopName, clients, sales, isAdmin, onAddClient, onUpdateClient, onRemoveClient, onRecordPayment, loyaltyRate }) {
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
@@ -1622,6 +1764,18 @@ function ClientsTab({ clients, sales, isAdmin, onAddClient, onUpdateClient, onRe
                 </div>
                 <span style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-sm">{fmt(spentByClient[c.id] || 0)} FCFA</span>
               </button>
+              {isAdmin && c.creditBalance > 0 && c.phone && (
+                <button
+                  onClick={() => {
+                    const msg = `Bonjour ${c.name}, petit rappel amical : votre solde à régler chez ${shopName || "nous"} est de ${fmt(c.creditBalance)} FCFA. Merci de passer le régler dès que possible. 🙏`;
+                    window.open(`https://wa.me/${waNumber(c.phone)}?text=${encodeURIComponent(msg)}`, "_blank");
+                  }}
+                  className="shrink-0 text-[11px] px-2 py-1 rounded-full"
+                  style={{ background: "#16A34A1A", color: "#16A34A" }}
+                >
+                  💬 Rappel
+                </button>
+              )}
             </Row>
           ))
         )}
@@ -1746,21 +1900,33 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
   const [onlineError, setOnlineError] = useState("");
   const [creditError, setCreditError] = useState("");
 
+  const stepOf = (i) => (i.decimal ? 0.5 : 1);
   const add = (p) => setCart((c) => {
     const existing = c.find((i) => i.id === p.id);
     if (existing) {
       if (existing.qty >= p.stock) return c;
-      return c.map((i) => (i.id === p.id ? { ...i, qty: i.qty + 1 } : i));
+      return c.map((i) => (i.id === p.id ? { ...i, qty: round3(Math.min(p.stock, i.qty + stepOf(i))) } : i));
     }
-    return p.stock > 0 ? [...c, { id: p.id, name: p.name, price: p.price, unit: p.unit, qty: 1 }] : c;
+    return p.stock > 0 ? [...c, { id: p.id, name: p.name, price: p.price, unit: p.unit, qty: 1, decimal: !!p.decimal, priceRetail: p.price, priceWholesale: p.wholesalePrice || null, mode: "detail" }] : c;
   });
-  const dec = (id) => setCart((c) => c.map((i) => (i.id === id ? { ...i, qty: i.qty - 1 } : i)).filter((i) => i.qty > 0));
+  const dec = (id) => setCart((c) => c.map((i) => (i.id === id ? { ...i, qty: round3(i.qty - stepOf(i)) } : i)).filter((i) => i.qty > 0));
   const inc = (id) => setCart((c) => {
     const product = products.find((p) => p.id === id);
     if (!product) return c;
-    return c.map((i) => (i.id === id ? { ...i, qty: i.qty < product.stock ? i.qty + 1 : i.qty } : i));
+    return c.map((i) => (i.id === id ? { ...i, qty: i.qty < product.stock ? round3(Math.min(product.stock, i.qty + stepOf(i))) : i.qty } : i));
   });
-  const total = cart.reduce((s, i) => s + i.qty * i.price, 0);
+  const setQty = (id, raw) => setCart((c) => {
+    const product = products.find((p) => p.id === id);
+    const v = round3(parseFloat(String(raw).replace(",", ".")));
+    if (!product || !(v > 0)) return c.filter((i) => i.id !== id);
+    return c.map((i) => (i.id === id ? { ...i, qty: Math.min(product.stock, v) } : i));
+  });
+  const toggleMode = (id) => setCart((c) => c.map((i) => {
+    if (i.id !== id || !i.priceWholesale) return i;
+    const gros = i.mode !== "gros";
+    return { ...i, mode: gros ? "gros" : "detail", price: gros ? i.priceWholesale : i.priceRetail };
+  }));
+  const total = Math.round(cart.reduce((s, i) => s + i.qty * i.price, 0));
   const selectedClient = clients.find((c) => c.id === clientId) || null;
 
   const createAndSelectClient = () => {
@@ -1793,7 +1959,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
             public_key: fedapayKey,
             transaction: {
               amount: total,
-              description: `Vente — ${shopName || "Wuri"}`,
+              description: `Vente — ${shopName || "WURI CENTER"}`,
             },
             customer: selectedClient ? {
               firstname: selectedClient.name,
@@ -1902,11 +2068,34 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
         <div className="fixed bottom-16 md:bottom-4 left-0 right-0 mx-auto max-w-lg px-4">
           <div className="rounded-xl p-4 space-y-2" style={{ background: "#FFFFFF", border: "1px solid #C08A3E55", boxShadow: "0 -8px 24px #00000055" }}>
             {cart.map((i) => (
-              <div key={i.id} className="flex items-center justify-between text-sm">
-                <span style={{ color: "#1B1F1C" }}>{i.name}</span>
-                <div className="flex items-center gap-2">
+              <div key={i.id} className="flex items-center justify-between text-sm gap-2">
+                <div className="min-w-0">
+                  <span style={{ color: "#1B1F1C" }} className="block truncate">{i.name}</span>
+                  <span className="text-[11px] flex items-center gap-1.5" style={{ color: "#6B6558" }}>
+                    {fmt(i.price)} FCFA{i.unit && i.unit !== "u" ? ` / ${i.unit}` : ""}
+                    {i.priceWholesale ? (
+                      <button onClick={() => toggleMode(i.id)} className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: i.mode === "gros" ? "#16A34A22" : "#F0ECE3", color: i.mode === "gros" ? "#16A34A" : "#6B6558", border: "1px solid #DCD5C6" }}>
+                        {i.mode === "gros" ? "Gros" : "Détail"}
+                      </button>
+                    ) : null}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
                   <button onClick={() => dec(i.id)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "#DCD5C6", color: "#1B1F1C" }}><Minus size={12} /></button>
+                  {i.decimal ? (
+                    <input
+                      key={`${i.id}:${i.qty}`}
+                      type="number"
+                      step="any"
+                      defaultValue={i.qty}
+                      onBlur={(e) => setQty(i.id, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                      className="w-14 text-center rounded-md outline-none py-0.5"
+                      style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C", background: "#F0ECE3", border: "1px solid #DCD5C6" }}
+                    />
+                  ) : (
                   <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="w-5 text-center">{i.qty}</span>
+                  )}
                   <button onClick={() => inc(i.id)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "#DCD5C6", color: "#1B1F1C" }}><Plus size={12} /></button>
                 </div>
               </div>
@@ -2057,8 +2246,8 @@ function InventaireTab({ products: allProducts, isAdmin, onRequestGerant, onVali
   }
 
   const diffs = products.map((p) => {
-    const counted = counts[p.id] === "" ? 0 : parseInt(counts[p.id] ?? p.stock) || 0;
-    return { ...p, counted, diff: counted - p.stock };
+    const counted = counts[p.id] === "" ? 0 : (p.decimal ? round3(parseFloat(counts[p.id] ?? p.stock) || 0) : (parseInt(counts[p.id] ?? p.stock) || 0));
+    return { ...p, counted, diff: round3(counted - p.stock) };
   });
   const changed = diffs.filter((d) => d.diff !== 0);
 
@@ -2075,6 +2264,7 @@ function InventaireTab({ products: allProducts, isAdmin, onRequestGerant, onVali
               <div className="flex items-center gap-2 shrink-0">
                 <input
                   type="number"
+                  step="any"
                   value={counts[p.id] ?? ""}
                   onChange={(e) => setCounts((c) => ({ ...c, [p.id]: e.target.value }))}
                   className="w-16 px-2 py-1.5 rounded-md text-sm text-right outline-none"
@@ -2194,7 +2384,7 @@ function HistoriqueTab({ sales }) {
 }
 
 /* ---------- Tableau de bord (ventes & meilleurs articles) ---------- */
-function DashboardTab({ sales, products }) {
+function DashboardTab({ sales, products, goal, setGoal }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const DAYS = 14;
 
@@ -2217,6 +2407,12 @@ function DashboardTab({ sales, products }) {
     return days;
   }, [sales]);
 
+  const monthTotal = useMemo(() => {
+    const n = new Date();
+    return sales.filter((x) => { const d = new Date(x.date); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); }).reduce((a, x) => a + x.total, 0);
+  }, [sales]);
+  const goalNum = Number(goal) || 0;
+  const goalPct = goalNum > 0 ? Math.min(100, Math.round((monthTotal / goalNum) * 100)) : 0;
   const maxDaily = Math.max(1, ...dailyData.map((d) => d.total));
   const totalPeriod = dailyData.reduce((s, d) => s + d.total, 0);
   const avgDaily = totalPeriod / DAYS;
@@ -2249,6 +2445,26 @@ function DashboardTab({ sales, products }) {
 
   return (
     <div className="space-y-5">
+      <div className="rounded-lg p-3 space-y-2" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px]" style={{ color: "#6B6558" }}>Objectif de ventes du mois</span>
+          <span className="text-[11px]" style={{ color: goalPct >= 100 ? "#16A34A" : "#C08A3E" }}>{goalNum > 0 ? `${goalPct} %` : "non défini"}</span>
+        </div>
+        <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "#F0ECE3" }}>
+          <div className="h-full rounded-full" style={{ width: `${goalPct}%`, background: goalPct >= 100 ? "#16A34A" : "#C08A3E" }} />
+        </div>
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <span style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{fmt(monthTotal)} FCFA{goalNum > 0 ? ` / ${fmt(goalNum)}` : ""}</span>
+          <input
+            type="number"
+            value={goal || ""}
+            onChange={(e) => setGoal(parseFloat(e.target.value) || 0)}
+            placeholder="Objectif en FCFA"
+            className="w-36 px-2 py-1 rounded-md text-sm text-right outline-none"
+            style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+          />
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-lg p-3" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
           <div className="text-[11px]" style={{ color: "#6B6558" }}>Total sur {DAYS} jours</div>
@@ -2511,7 +2727,7 @@ function PayslipModal({ data, year, month, onClose }) {
         </div>
 
         <p className="text-[10px]" style={{ color: "#16A34A" }}>
-          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans Wuri pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
+          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans WURI CENTER pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
         </p>
 
         <button onClick={() => window.print()} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>
@@ -2911,11 +3127,62 @@ function DevisModal({ products, clients, shopName, receiptFormat, onClose }) {
 }
 
 /* ---------- Réglages ---------- */
-function CategoryManager({ categories, products, onSave, onRename }) {
+function SafetyPanel({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore }) {
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const run = async (fn, okMsg, failMsg) => {
+    setBusy(true); setMsg("");
+    const ok = await fn();
+    setBusy(false);
+    setMsg(ok ? okMsg : failMsg);
+  };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
+        <Lock size={13} /> Sécurité et sauvegarde
+      </div>
+      <div className="rounded-lg p-3 space-y-3" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+        <div>
+          <label className="text-xs" style={{ color: "#6B6558" }}>Verrouillage automatique après inactivité</label>
+          <select value={Number(lockMinutes) || 0} onChange={(e) => setLockMinutes(parseInt(e.target.value, 10) || 0)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>
+            <option value={0}>Désactivé</option>
+            <option value={2}>Après 2 minutes</option>
+            <option value={5}>Après 5 minutes</option>
+            <option value={10}>Après 10 minutes</option>
+            <option value={30}>Après 30 minutes</option>
+          </select>
+          <p className="text-[11px] mt-1" style={{ color: "#6B6558" }}>Si personne ne touche l'écran, l'application revient à l'écran de connexion.</p>
+        </div>
+        <div className="pt-2 border-t space-y-2" style={{ borderColor: "#DCD5C6" }}>
+          <p className="text-xs" style={{ color: "#6B6558" }}>
+            {backupInfo ? `Dernière sauvegarde : ${new Date(backupInfo.date).toLocaleString("fr-FR")} · ${backupInfo.products} article(s) · ${backupInfo.sales} vente(s)` : "Aucune sauvegarde pour l'instant."}
+          </p>
+          <p className="text-[11px]" style={{ color: "#6B6558" }}>Une sauvegarde automatique est faite chaque jour quand le gérant se connecte.</p>
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={() => run(onBackup, "✓ Sauvegarde enregistrée.", "Échec de la sauvegarde.")} className="flex-1 py-2 rounded-md text-sm font-medium disabled:opacity-50" style={{ background: "#C08A3E", color: "#FFFFFF" }}>
+              Sauvegarder maintenant
+            </button>
+            <button
+              disabled={busy || !backupInfo}
+              onClick={() => { if (window.confirm("Restaurer la dernière sauvegarde ? Les données actuelles (articles, ventes, clients, personnel) seront REMPLACÉES par celles de la sauvegarde.")) run(onRestore, "✓ Sauvegarde restaurée.", "Échec de la restauration."); }}
+              className="flex-1 py-2 rounded-md text-sm font-medium disabled:opacity-40"
+              style={{ background: "#FFFFFF", border: "1px solid #DC4C3C55", color: "#DC4C3C" }}
+            >
+              Restaurer
+            </button>
+          </div>
+          {msg && <p className="text-xs" style={{ color: msg.startsWith("✓") ? "#16A34A" : "#DC4C3C" }}>{msg}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategoryManager({ categories, products, onSave, onRename, title = "Catégories d'articles", hint = "Crée tes propres rayons (ex. Électroménager, Carreaux, Lavabos). Ils servent de filtres dans Stock et Vente.", placeholder = "Nouvelle catégorie…", field = "category", noun = "catégorie" }) {
   const [newName, setNewName] = useState("");
   const [editing, setEditing] = useState(null);
   const [editValue, setEditValue] = useState("");
-  const countOf = (c) => products.filter((p) => p.category === c).length;
+  const countOf = (c) => products.filter((p) => (p[field] || (field === "depot" ? categories[0] : "")) === c).length;
   const add = () => {
     const n = newName.trim();
     if (!n || categories.some((c) => c.toLowerCase() === n.toLowerCase())) return;
@@ -2929,16 +3196,16 @@ function CategoryManager({ categories, products, onSave, onRename }) {
   };
   const remove = (c) => {
     const cnt = countOf(c);
-    const msg = cnt > 0 ? `Supprimer la catégorie « ${c} » ? Les ${cnt} article(s) gardent leur catégorie mais elle n'apparaîtra plus dans la liste.` : `Supprimer la catégorie « ${c} » ?`;
+    const msg = cnt > 0 ? `Supprimer ${noun === "dépôt" ? "le" : "la"} ${noun} « ${c} » ? Les ${cnt} article(s) la gardent mais elle n'apparaîtra plus dans la liste.` : `Supprimer ${noun === "dépôt" ? "le" : "la"} ${noun} « ${c} » ?`;
     if (window.confirm(msg)) onSave(categories.filter((x) => x !== c));
   };
   return (
     <div>
       <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
-        <Package size={13} /> Catégories d'articles
+        <Package size={13} /> {title}
       </div>
       <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
-        <p className="text-xs" style={{ color: "#6B6558" }}>Crée tes propres rayons (ex. Électroménager, Carreaux, Lavabos). Ils servent de filtres dans Stock et Vente.</p>
+        <p className="text-xs" style={{ color: "#6B6558" }}>{hint}</p>
         {categories.map((c) => (
           <div key={c} className="flex items-center gap-2">
             {editing === c ? (
@@ -2956,7 +3223,7 @@ function CategoryManager({ categories, products, onSave, onRename }) {
           </div>
         ))}
         <div className="flex items-center gap-2 pt-1">
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="Nouvelle catégorie…" className="flex-1 min-w-0 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={placeholder} className="flex-1 min-w-0 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
           <button onClick={add} className="px-3 py-2 rounded-md text-sm font-medium shrink-0" style={{ background: "#C08A3E", color: "#FFFFFF" }}>Ajouter</button>
         </div>
       </div>
@@ -2964,7 +3231,7 @@ function CategoryManager({ categories, products, onSave, onRename }) {
   );
 }
 
-function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -3135,6 +3402,8 @@ function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessT
       )}
 
       {isAdmin && <CategoryManager categories={categories} products={products} onSave={onSaveCategories} onRename={onRenameCategory} />}
+      {isAdmin && <SafetyPanel lockMinutes={lockMinutes} setLockMinutes={setLockMinutes} backupInfo={backupInfo} onBackup={onBackup} onRestore={onRestore} />}
+      {isAdmin && <CategoryManager categories={depots} products={products} onSave={onSaveDepots} onRename={onRenameDepot} title="Dépôts / magasins" hint="Indique où se trouve chaque article (ex. Magasin principal, Dépôt 2). Tu peux filtrer le stock par dépôt." placeholder="Nouveau dépôt…" field="depot" noun="dépôt" />}
 
       {isAdmin && (
         <div>
@@ -3366,6 +3635,10 @@ function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessT
                     <button onClick={() => onRemoveSeller(s.id)} className="text-xs" style={{ color: "#DC4C3C" }}><Trash2 size={14} /></button>
                   </div>
                 </div>
+                <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={!!s.stockKeeper} onChange={(e) => onUpdatePerson("seller", s.id, { stockKeeper: e.target.checked })} className="w-4 h-4" />
+                  <span className="text-[11px]" style={{ color: "#6B6558" }}>Magasinier : peut ajouter et modifier le stock, faire l'inventaire</span>
+                </label>
                 <div className="flex items-center gap-1 mt-2">
                   <span className="text-[11px]" style={{ color: "#6B6558" }}>Taux horaire</span>
                   <input
@@ -3461,6 +3734,10 @@ function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessT
                   </span>
                   <button onClick={() => onRemoveCashier(c.id)} className="text-xs" style={{ color: "#DC4C3C" }}><Trash2 size={14} /></button>
                 </div>
+                <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={!!c.stockKeeper} onChange={(e) => onUpdatePerson("cashier", c.id, { stockKeeper: e.target.checked })} className="w-4 h-4" />
+                  <span className="text-[11px]" style={{ color: "#6B6558" }}>Magasinier : peut ajouter et modifier le stock, faire l'inventaire</span>
+                </label>
                 <div className="flex items-center gap-1 mt-2">
                   <span className="text-[11px]" style={{ color: "#6B6558" }}>Taux horaire</span>
                   <input
@@ -3594,7 +3871,7 @@ function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessT
                     const text = low.length === 0
                       ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                       : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
-                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "Wuri"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "WURI CENTER"}`)}&body=${encodeURIComponent(text)}`, "_blank");
                   }}
                   className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
                   style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#DC4C3C" }}
@@ -3607,7 +3884,7 @@ function ReglagesTab({ categories, onSaveCategories, onRenameCategory, businessT
                     const todaySales = sales.filter((s) => new Date(s.date) >= start);
                     const total = todaySales.reduce((s, v) => s + v.total, 0);
                     const text = `${todaySales.length} vente(s)\nTotal : ${fmt(total)} FCFA`;
-                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "Wuri"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "WURI CENTER"}`)}&body=${encodeURIComponent(text)}`, "_blank");
                   }}
                   className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
                   style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#16A34A" }}
@@ -3759,7 +4036,7 @@ function InstallBanner() {
         <Package size={20} className="shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold leading-tight" style={{ fontFamily: "'Carlito', sans-serif" }}>
-            Installe Wuri sur ton téléphone
+            Installe WURI CENTER sur ton téléphone
           </p>
           <p className="text-[11px] leading-tight opacity-80">Accès plus rapide, fonctionne même hors connexion</p>
         </div>
@@ -3932,7 +4209,7 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
                 topSeller ? `Meilleur vendeur : ${topSeller[0]} (${fmt(topSeller[1])} FCFA)` : null,
                 lowStock.length > 0 ? `⚠️ Stock bas : ${lowStock.map((p) => p.name).join(", ")}` : null,
               ].filter(Boolean).join("\n");
-              const subject = `Rapport ${label} — Wuri`;
+              const subject = `Rapport ${label} — WURI CENTER`;
               window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines)}`, "_blank");
             }}
             className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
@@ -4007,6 +4284,15 @@ function AppInner() {
   const [shopName, setShopName, shopNameLoaded] = useShared(k("shopName"), "", pendingRef, bumpSync);
   const [customCategories, setCustomCategories] = useShared(k("categories"), null, pendingRef, bumpSync);
   const categories = Array.isArray(customCategories) ? customCategories : (businessType && BUSINESS_TYPES[businessType] ? BUSINESS_TYPES[businessType].categories : []);
+  const [lockMinutes, setLockMinutes] = useShared(k("lockMinutes"), 0, pendingRef, bumpSync);
+  const [backupInfo, setBackupInfo] = useState(null);
+  const [salesGoal, setSalesGoal] = useShared(k("salesGoal"), 0, pendingRef, bumpSync);
+  const [customDepots, setCustomDepots] = useShared(k("depots"), null, pendingRef, bumpSync);
+  const depots = Array.isArray(customDepots) && customDepots.length ? customDepots : DEFAULT_DEPOTS;
+  const renameDepot = (oldName, newName) => {
+    setCustomDepots(depots.map((d) => (d === oldName ? newName : d)));
+    setProducts((ps) => ps.map((p) => ((p.depot || depots[0]) === oldName ? { ...p, depot: newName } : p)));
+  };
   const renameCategory = (oldName, newName) => {
     setCustomCategories(categories.map((c) => (c === oldName ? newName : c)));
     setProducts((ps) => ps.map((p) => (p.category === oldName ? { ...p, category: newName } : p)));
@@ -4040,6 +4326,10 @@ function AppInner() {
   const [pinError, setPinError] = useState("");
 
   const isAdmin = currentUser?.role === "gerant";
+  const currentPerson = currentUser && currentUser.id ? (currentUser.role === "vendeur" ? sellers : currentUser.role === "caissier" ? cashiers : []).find((x) => x.id === currentUser.id) : null;
+  const isStockKeeper = !!(currentPerson && currentPerson.stockKeeper);
+  const canStock = isAdmin || isStockKeeper;
+  const updatePerson = (type, id, patch) => (type === "seller" ? setSellers : setCashiers)((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const ready = shopIdLoaded && !!shopId && productsLoaded && salesLoaded && btLoaded && shopNameLoaded && pinLoaded && sellersLoaded && cashiersLoaded && clientsLoaded && hoursLoaded && shiftsLoaded;
 
   // Première ouverture d'un commerce démo : on le pré-remplit une seule fois
@@ -4166,6 +4456,69 @@ function AppInner() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
+  // Verrouillage automatique : après N minutes sans toucher l'écran, retour à l'écran de connexion.
+  const lastActivityRef = useRef(Date.now());
+  useEffect(() => {
+    if (!currentUser || !(Number(lockMinutes) > 0)) return;
+    lastActivityRef.current = Date.now();
+    const touch = () => { lastActivityRef.current = Date.now(); };
+    const events = ["pointerdown", "keydown", "touchstart", "scroll", "wheel"];
+    events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    const timer = setInterval(() => {
+      if (Date.now() - lastActivityRef.current >= Number(lockMinutes) * 60000) {
+        setCurrentUser(null);
+        setPendingUser(null);
+      }
+    }, 10000);
+    return () => { events.forEach((e) => window.removeEventListener(e, touch)); clearInterval(timer); };
+  }, [currentUser, lockMinutes]);
+
+  // Sauvegarde : une copie complète du commerce, stockée sous la clé "backup:CODE".
+  const backupKey = shopId ? `backup:${shopId}` : null;
+  const makeBackup = async () => {
+    if (!backupKey) return false;
+    const data = { products, sales, clients, sellers, cashiers, shifts, expenses, purchases, closures, hours, salesGoal, categories: customCategories, depots: customDepots };
+    const payload = { date: Date.now(), version: APP_VERSION, data };
+    try {
+      await storage.set(backupKey, JSON.stringify(payload), true);
+      setBackupInfo({ date: payload.date, products: products.length, sales: sales.length });
+      return true;
+    } catch (e) { return false; }
+  };
+  const restoreBackup = async () => {
+    if (!backupKey) return false;
+    try {
+      const res = await storage.get(backupKey, true);
+      if (!res) return false;
+      const { data } = JSON.parse(res.value);
+      if (!data) return false;
+      setProducts(data.products || []); setSales(data.sales || []); setClients(data.clients || []);
+      setSellers(data.sellers || []); setCashiers(data.cashiers || []); setShifts(data.shifts || []);
+      setExpenses(data.expenses || []); setPurchases(data.purchases || []); setClosures(data.closures || []);
+      if (data.hours) setHours(data.hours);
+      setSalesGoal(data.salesGoal || 0);
+      setCustomCategories(data.categories ?? null); setCustomDepots(data.depots ?? null);
+      return true;
+    } catch (e) { return false; }
+  };
+  const autoBackupDone = useRef(false);
+  useEffect(() => {
+    if (!backupKey) return;
+    (async () => {
+      try {
+        const res = await storage.get(backupKey, true);
+        if (res) { const b = JSON.parse(res.value); setBackupInfo({ date: b.date, products: (b.data?.products || []).length, sales: (b.data?.sales || []).length }); }
+      } catch (e) {}
+    })();
+  }, [backupKey]);
+  useEffect(() => {
+    if (!isAdmin || !ready || autoBackupDone.current || !backupKey || shopId === TEST_SHOP_CODE || shopId.startsWith(DEMO_PREFIX)) return;
+    if (products.length === 0 && sales.length === 0) return;
+    if (backupInfo && Date.now() - backupInfo.date < 20 * 3600 * 1000) { autoBackupDone.current = true; return; }
+    autoBackupDone.current = true;
+    makeBackup();
+  }, [isAdmin, ready, backupKey, backupInfo]);
+
   const genShopCode = () => {
     const part = () => Math.random().toString(36).slice(2, 6).toUpperCase();
     return `${part()}-${part()}`;
@@ -4207,6 +4560,13 @@ function AppInner() {
         setKnownShops(res ? JSON.parse(res.value) : []);
       } catch (e) {}
     })();
+  }, []);
+  const forgetShop = useCallback((code) => {
+    setKnownShops((prev) => {
+      const next = prev.filter((s) => s.code !== code);
+      storage.set("knownShops", JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
   }, []);
   const rememberShop = useCallback((code, label) => {
     setKnownShops((prev) => {
@@ -4271,12 +4631,52 @@ function AppInner() {
     try { await storage.delete("shopId", false); } catch (e) {}
   };
 
+  // ---------- Durée de vie des démos (24 h) ----------
+  const [demoLeft, setDemoLeft] = useState(null); // millisecondes restantes de la démo ouverte
+  useEffect(() => {
+    if (!shopId || !shopId.startsWith(DEMO_PREFIX)) { setDemoLeft(null); return; }
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await storage.get(`demoCreated:${shopId}`, true);
+        let started = res ? JSON.parse(res.value) : null;
+        if (!started) { started = Date.now(); await storage.set(`demoCreated:${shopId}`, JSON.stringify(started), true); }
+        const left = started + DEMO_TTL_MS - Date.now();
+        if (cancelled) return;
+        if (left <= 0) {
+          await storage.deleteShopData(shopId);
+          await leaveShop();
+          window.alert("Cette démo a expiré (24 h) et ses données ont été supprimées. Tu peux en lancer une nouvelle.");
+        } else {
+          setDemoLeft(left);
+        }
+      } catch (e) {}
+    };
+    check();
+    const timer = setInterval(check, 60000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [shopId]);
+  // Nettoyage : toute démo dont les 24 h sont écoulées est supprimée, où qu'elle ait été ouverte.
+  useEffect(() => {
+    (async () => {
+      try {
+        const codes = await storage.listCodesWithPrefix(DEMO_PREFIX);
+        for (const c of codes) {
+          const res = await storage.get(`demoCreated:${c}`, true);
+          const started = res ? JSON.parse(res.value) : null;
+          if (started && Date.now() - started > DEMO_TTL_MS) await storage.deleteShopData(c);
+        }
+      } catch (e) {}
+    })();
+  }, []);
+
   // ---------- Mode démo ----------
   // Ouvre un commerce factice (jamais dans le registre public, jamais bloqué par
   // l'abonnement) pré-rempli de données fictives, pour montrer l'appli sans
   // toucher aux vraies données d'un commerce.
   const startDemo = async () => {
     const code = DEMO_PREFIX + Math.random().toString(36).slice(2, 6).toUpperCase();
+    try { await storage.set(`demoCreated:${code}`, JSON.stringify(Date.now()), true); } catch (e) {}
     setShopId(code);
     try { await storage.set("shopId", code, false); } catch (e) {}
   };
@@ -4437,7 +4837,7 @@ function AppInner() {
         const newCodes = (p.codes || []).map((c) => (assignedIds.has(c.id) ? { ...c, used: true, usedAt: saleDate } : c));
         return { ...p, codes: newCodes, stock: newCodes.filter((c) => !c.used).length };
       }
-      return { ...p, stock: Math.max(0, p.stock - item.qty) };
+      return { ...p, stock: Math.max(0, round3(p.stock - item.qty)) };
     }));
 
     const cartItemsWithCodes = cartItems.map((i) => (codesAssigned[i.id] ? { ...i, codes: codesAssigned[i.id] } : i));
@@ -4563,26 +4963,47 @@ function AppInner() {
     loans: [...(c.loans || []), { id: uid(), amount, date: Date.now(), type: "remboursement" }],
   } : c)));
 
-  const handlePinSubmit = (code) => {
+  // Limite d'essais : 5 codes faux de suite = pause d'une minute (protège contre le "tâtonnement" sur l'appareil).
+  const pinFailsRef = useRef({ n: 0, until: 0 });
+  const handlePinSubmit = async (code) => {
+    const now = Date.now();
+    if (pinFailsRef.current.until > now) { setPinError("Trop d'essais. Réessaie dans une minute."); return; }
+    const fail = () => {
+      pinFailsRef.current.n += 1;
+      if (pinFailsRef.current.n >= 5) { pinFailsRef.current = { n: 0, until: Date.now() + 60000 }; setPinError("Trop d'essais. Réessaie dans une minute."); }
+      else setPinError("Code incorrect");
+    };
+    const ok = () => { pinFailsRef.current = { n: 0, until: 0 }; };
     if (pinPrompt === "create-gerant") {
-      setAdminPin(code);
+      setAdminPin(await hashPin(code, `${shopId}:gerant`));
       setPendingUser({ role: "gerant", name: "Gérant" });
       setPinPrompt(null);
     } else if (pinPrompt === "login-gerant") {
-      if (code === adminPin) { setPendingUser({ role: "gerant", name: "Gérant" }); setPinPrompt(null); }
-      else setPinError("Code incorrect");
+      if (await pinMatches(code, adminPin, `${shopId}:gerant`)) {
+        ok();
+        if (adminPin && !String(adminPin).startsWith("h1:") && !(shopId || "").startsWith(DEMO_PREFIX)) setAdminPin(await hashPin(code, `${shopId}:gerant`));
+        setPendingUser({ role: "gerant", name: "Gérant" }); setPinPrompt(null);
+      } else fail();
     } else if (pinPrompt === "login-vendeur") {
-      if (code === pinTarget.pin) { setPendingUser({ role: "vendeur", name: pinTarget.name, id: pinTarget.id }); setPinPrompt(null); }
-      else setPinError("Code incorrect");
+      if (await pinMatches(code, pinTarget.pin, `${shopId}:${pinTarget.id}`)) {
+        ok();
+        if (!String(pinTarget.pin).startsWith("h1:")) { const h = await hashPin(code, `${shopId}:${pinTarget.id}`); setSellers((prev) => prev.map((x) => (x.id === pinTarget.id ? { ...x, pin: h } : x))); }
+        setPendingUser({ role: "vendeur", name: pinTarget.name, id: pinTarget.id }); setPinPrompt(null);
+      } else fail();
     } else if (pinPrompt === "create-vendeur") {
-      const seller = { id: uid(), name: pinTarget.name, pin: code, commission: pinTarget.commission || 0 };
+      const id = uid();
+      const seller = { id, name: pinTarget.name, pin: await hashPin(code, `${shopId}:${id}`), commission: pinTarget.commission || 0 };
       setSellers((prev) => [...prev, seller]);
       setPinPrompt(null);
     } else if (pinPrompt === "login-caissier") {
-      if (code === pinTarget.pin) { setPendingUser({ role: "caissier", name: pinTarget.name, id: pinTarget.id }); setPinPrompt(null); }
-      else setPinError("Code incorrect");
+      if (await pinMatches(code, pinTarget.pin, `${shopId}:${pinTarget.id}`)) {
+        ok();
+        if (!String(pinTarget.pin).startsWith("h1:")) { const h = await hashPin(code, `${shopId}:${pinTarget.id}`); setCashiers((prev) => prev.map((x) => (x.id === pinTarget.id ? { ...x, pin: h } : x))); }
+        setPendingUser({ role: "caissier", name: pinTarget.name, id: pinTarget.id }); setPinPrompt(null);
+      } else fail();
     } else if (pinPrompt === "create-caissier") {
-      const cashier = { id: uid(), name: pinTarget.name, pin: code };
+      const id = uid();
+      const cashier = { id, name: pinTarget.name, pin: await hashPin(code, `${shopId}:${id}`) };
       setCashiers((prev) => [...prev, cashier]);
       setPinPrompt(null);
     }
@@ -4597,7 +5018,7 @@ function AppInner() {
   }
 
   if (!shopId) {
-    return <ShopScreen onCreate={createShop} onJoin={joinShop} onDevOpen={joinShop} onDemo={startDemo} knownShops={knownShops} />;
+    return <ShopScreen onCreate={createShop} onJoin={joinShop} onDevOpen={joinShop} onDemo={startDemo} knownShops={knownShops} onForget={forgetShop} />;
   }
 
   if (!ready) {
@@ -4626,7 +5047,7 @@ function AppInner() {
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={60} />
-            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">Wuri</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Choisis ton type de commerce pour commencer</p>
           </div>
           <div className="space-y-2">
@@ -4756,7 +5177,7 @@ function AppInner() {
               <Logo size={34} />
             )}
             <div>
-              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">Wuri</h1>
+              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">WURI CENTER</h1>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <p className="text-xs" style={{ color: "#16A34A" }}>{BUSINESS_TYPES[businessType].icon} {currentUser.name}</p>
                 {isOpenNow !== null && (
@@ -4771,7 +5192,7 @@ function AppInner() {
                 <SyncBadge online={online} pendingCount={pendingRef.current.size} />
                 {shopId && shopId.startsWith(DEMO_PREFIX) && (
                   <span className="text-[10px] px-2 py-1 rounded-full flex items-center gap-1" style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E55" }}>
-                    <Sparkles size={11} /> DÉMO
+                    <Sparkles size={11} /> DÉMO{demoLeft != null ? ` · ${Math.floor(demoLeft / 3600000)}h${String(Math.floor((demoLeft % 3600000) / 60000)).padStart(2, "0")}` : ""}
                   </span>
                 )}
                 {isAdmin && lowStockCount > 0 && (
@@ -4809,14 +5230,14 @@ function AppInner() {
           <div className="hidden md:flex items-center gap-3 shrink-0">
             <div className="text-right">
               <p className="text-sm" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>{currentUser.name}</p>
-              <p className="text-[11px]" style={{ color: "#6B6558" }}>{isAdmin ? "Gérant" : currentUser.role === "caissier" ? "Caissier" : "Vendeur"}</p>
+              <p className="text-[11px]" style={{ color: "#6B6558" }}>{isAdmin ? "Gérant" : isStockKeeper ? "Magasinier" : currentUser.role === "caissier" ? "Caissier" : "Vendeur"}</p>
             </div>
             <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold" style={{ background: "#C08A3E", color: "#FFFFFF" }}>
               {currentUser.name?.[0]?.toUpperCase() || "?"}
             </div>
           </div>
 
-          {tab === "stock" && isAdmin && (
+          {tab === "stock" && canStock && (
             <button onClick={() => setModalProduct({})} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 md:hidden" style={{ background: "#C08A3E", color: "#F0ECE3" }}>
               <Plus size={20} />
             </button>
@@ -4831,10 +5252,10 @@ function AppInner() {
       )}
 
       <main className="max-w-lg md:max-w-3xl mx-auto px-4 pb-4">
-        {tab === "stock" && <StockTab categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
+        {tab === "stock" && <StockTab canEdit={canStock} depots={depots} categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
         {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} />}
-        {tab === "clients" && <ClientsTab clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
-        {tab === "inventaire" && <InventaireTab products={products} isAdmin={isAdmin} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
+        {tab === "clients" && <ClientsTab shopName={shopName} clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
+        {tab === "inventaire" && <InventaireTab products={products} isAdmin={canStock} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
         {tab === "historique" && <HistoriqueTab sales={sales} />}
         {tab === "agenda" && <AgendaTab shifts={shifts} />}
         {tab === "paie" && (
@@ -4850,9 +5271,18 @@ function AppInner() {
             onDeleteExpense={(id) => setExpenses((prev) => prev.filter((e) => e.id !== id))}
           />
         )}
-        {tab === "dashboard" && isAdmin && <DashboardTab sales={sales} products={products} />}
+        {tab === "dashboard" && isAdmin && <DashboardTab sales={sales} products={products} goal={salesGoal} setGoal={setSalesGoal} />}
         {tab === "reglages" && (
           <ReglagesTab
+            lockMinutes={lockMinutes}
+            setLockMinutes={setLockMinutes}
+            backupInfo={backupInfo}
+            onBackup={makeBackup}
+            onRestore={restoreBackup}
+            onUpdatePerson={updatePerson}
+            depots={depots}
+            onSaveDepots={setCustomDepots}
+            onRenameDepot={renameDepot}
             categories={categories}
             onSaveCategories={setCustomCategories}
             onRenameCategory={renameCategory}
@@ -4923,7 +5353,7 @@ function AppInner() {
       </nav>
 
       {modalProduct !== null && (
-        <ProductModal product={modalProduct.id ? modalProduct : null} categories={categories} businessType={businessType} shopId={shopId} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
+        <ProductModal product={modalProduct.id ? modalProduct : null} canDelete={isAdmin} depots={depots} categories={categories} businessType={businessType} shopId={shopId} onSave={saveProduct} onDelete={deleteProduct} onClose={() => setModalProduct(null)} />
       )}
 
       {pinPrompt && (
@@ -4983,7 +5413,7 @@ function SplashScreen({ onDone }) {
         <Logo size={84} />
       </div>
       <p className="wuri-splash-text mt-5 text-lg" style={{ fontFamily: "'Carlito', sans-serif", color: "#F0ECE3" }}>
-        Bienvenue chez Wuri
+        Bienvenue chez WURI CENTER
       </p>
       <p className="wuri-splash-text mt-1 text-xs" style={{ color: "#8A6A2E" }}>
         Gestion de commerce, simplement
