@@ -45,7 +45,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.7";
+const APP_VERSION = "3.9.8";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -219,6 +219,26 @@ const waPhone = (phone) => {
   if (p.startsWith("228")) return p;
   return p ? "228" + p : "";
 };
+
+// Numéros WhatsApp d'alerte du commerce (jusqu'à 3) : un bouton d'envoi par numéro.
+// WhatsApp ne permet d'ouvrir qu'une conversation à la fois : chaque bouton ouvre le message déjà prêt pour ce numéro.
+const cleanAlertPhones = (arr) => (Array.isArray(arr) ? arr : []).filter((p) => p && waPhone(p.phone)).slice(0, 3);
+function WaAlertButtons({ phones, text, label, className, style }) {
+  const list = cleanAlertPhones(phones);
+  const go = (num) => window.open(`https://wa.me/${num ? waPhone(num) : ""}?text=${encodeURIComponent(text)}`, "_blank");
+  if (list.length === 0) {
+    return <button onClick={() => go("")} className={className} style={style}>{label}</button>;
+  }
+  return (
+    <>
+      {list.map((p, i) => (
+        <button key={i} onClick={() => go(p.phone)} className={className} style={style}>
+          {label} → {p.name ? p.name : "+" + waPhone(p.phone)}
+        </button>
+      ))}
+    </>
+  );
+}
 
 /* ---------- Format d'impression du ticket (58mm / 80mm / A4) ---------- */
 function receiptPrintCss(format) {
@@ -1098,7 +1118,7 @@ function CategoryChips({ categories, value, onChange, counts }) {
   );
 }
 
-function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, categories, depots }) {
+function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, categories, depots, alertPhones }) {
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [depotFilter, setDepotFilter] = useState("");
@@ -1142,16 +1162,15 @@ function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, 
               <span className="font-semibold" style={{ color: "#DC4C3C" }}>{lowStock.length} article{lowStock.length > 1 ? "s" : ""}</span> en stock bas : {lowStock.map((p) => p.name).join(", ")}
             </div>
             {isAdmin && (
-              <button
-                onClick={() => {
-                  const text = `⚠️ Stock bas — ${lowStock.length} article${lowStock.length > 1 ? "s" : ""} à réapprovisionner :\n` + lowStock.map((p) => `• ${p.name} (${p.stock} ${p.unit} restant${p.stock > 1 ? "s" : ""})`).join("\n");
-                  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-                }}
-                className="mt-1.5 text-xs flex items-center gap-1"
-                style={{ color: "#1B9E52" }}
-              >
-                💬 Alerter par WhatsApp
-              </button>
+              <div className="mt-1.5 flex flex-col items-start gap-1">
+                <WaAlertButtons
+                  phones={alertPhones}
+                  label="💬 Alerter par WhatsApp"
+                  text={`⚠️ Stock bas — ${lowStock.length} article${lowStock.length > 1 ? "s" : ""} à réapprovisionner :\n` + lowStock.map((p) => `• ${p.name} (${p.stock} ${p.unit} restant${p.stock > 1 ? "s" : ""})`).join("\n")}
+                  className="text-xs flex items-center gap-1"
+                  style={{ color: "#1B9E52" }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -3231,7 +3250,7 @@ function CategoryManager({ categories, products, onSave, onRename, title = "Cat�
   );
 }
 
-function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -3239,6 +3258,11 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
   const [reportPeriod, setReportPeriod] = useState(null);
   const [keyDraft, setKeyDraft] = useState(fedapayKey || "");
   const [keySaved, setKeySaved] = useState(false);
+  const padPhones = (arr) => [0, 1, 2].map((i) => ({ name: (arr && arr[i] && arr[i].name) || "", phone: (arr && arr[i] && arr[i].phone) || "" }));
+  const [phonesDraft, setPhonesDraft] = useState(padPhones(alertPhones));
+  const [phonesSaved, setPhonesSaved] = useState(false);
+  const phonesKey = JSON.stringify(alertPhones || []);
+  useEffect(() => { setPhonesDraft(padPhones(alertPhones)); }, [phonesKey]);
   const [emailDraft, setEmailDraft] = useState(gerantEmail || "");
   const [emailSaved, setEmailSaved] = useState(false);
   const [loyaltyDraft, setLoyaltyDraft] = useState(loyaltyRate || "");
@@ -3467,6 +3491,47 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
             <p className="text-[10px]" style={{ color: "#6B6558" }}>
               Trouve ta clé sur ton compte FedaPay (fedapay.com) → Développeurs → Clés API. Sans cette clé, l'option "Paiement en ligne" reste visible mais ne fonctionne pas.
             </p>
+          </div>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Numéros WhatsApp d'alerte (jusqu'à 3)</div>
+          <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+            <p className="text-xs" style={{ color: "#6B6558" }}>
+              Les alertes de stock bas et les rapports proposent un bouton par numéro. Écris le numéro avec ou sans l'indicatif (le Togo, +228, est ajouté si besoin).
+            </p>
+            {phonesDraft.map((p, i) => (
+              <div key={i} className="flex gap-2">
+                <input
+                  value={p.name}
+                  onChange={(e) => { const n = [...phonesDraft]; n[i] = { ...n[i], name: e.target.value }; setPhonesDraft(n); setPhonesSaved(false); }}
+                  placeholder={`Nom ${i + 1} (facultatif)`}
+                  className="w-2/5 px-3 py-2.5 rounded-md text-sm outline-none"
+                  style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+                />
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={p.phone}
+                  onChange={(e) => { const n = [...phonesDraft]; n[i] = { ...n[i], phone: e.target.value }; setPhonesDraft(n); setPhonesSaved(false); }}
+                  placeholder="90 00 00 00"
+                  className="flex-1 px-3 py-2.5 rounded-md text-sm outline-none"
+                  style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}
+                />
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setAlertPhones(phonesDraft.map((p) => ({ name: p.name.trim(), phone: p.phone.trim() })).filter((p) => waPhone(p.phone)).slice(0, 3)); setPhonesSaved(true); }}
+                className="px-4 py-2 rounded-md text-sm font-medium"
+                style={{ background: "#C08A3E", color: "#FFFFFF" }}
+              >
+                Enregistrer
+              </button>
+              {phonesSaved && <span className="text-xs" style={{ color: "#16A34A" }}>✓ Numéros enregistrés</span>}
+            </div>
           </div>
         </div>
       )}
@@ -3837,32 +3902,30 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
         <div>
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Alertes WhatsApp</div>
           <div className="flex flex-col gap-2">
-            <button
-              onClick={() => {
+            <WaAlertButtons
+              phones={alertPhones}
+              label="⚠️ Envoyer l'alerte stock bas"
+              text={(() => {
                 const low = products.filter((p) => p.stock <= p.threshold);
-                const text = low.length === 0
+                return low.length === 0
                   ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                   : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
-                window.open(`https://wa.me/22891280815?text=${encodeURIComponent(text)}`, "_blank");
-              }}
+              })()}
               className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
               style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#DC4C3C" }}
-            >
-              <AlertTriangle size={15} /> Envoyer l'alerte stock bas
-            </button>
-            <button
-              onClick={() => {
+            />
+            <WaAlertButtons
+              phones={alertPhones}
+              label="📊 Envoyer le rapport du jour"
+              text={(() => {
                 const { start, label } = periodRange("day");
                 const todaySales = sales.filter((s) => new Date(s.date) >= start);
                 const total = todaySales.reduce((s, v) => s + v.total, 0);
-                const text = `📊 Rapport ${label} — ${shopName || "mon commerce"}\n\n${todaySales.length} vente(s)\nTotal : ${fmt(total)} FCFA`;
-                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-              }}
+                return `📊 Rapport ${label} — ${shopName || "mon commerce"}\n\n${todaySales.length} vente(s)\nTotal : ${fmt(total)} FCFA`;
+              })()}
               className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
               style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#16A34A" }}
-            >
-              <Receipt size={15} /> Envoyer le rapport du jour
-            </button>
+            />
             {gerantEmail && (
               <>
                 <button
@@ -3950,7 +4013,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
       </div>
 
       {reportPeriod && (
-        <DailyReportModal sales={sales} products={products} expenses={expenses} purchases={purchases} sellers={sellers} period={reportPeriod} gerantEmail={gerantEmail} onClose={() => setReportPeriod(null)} />
+        <DailyReportModal sales={sales} products={products} expenses={expenses} purchases={purchases} sellers={sellers} period={reportPeriod} gerantEmail={gerantEmail} alertPhones={alertPhones} onClose={() => setReportPeriod(null)} />
       )}
       {showPurchases && (
         <PurchasesModal products={products} purchases={purchases} onAdd={onAddPurchase} onDelete={onDeletePurchase} onClose={() => setShowPurchases(false)} />
@@ -4087,7 +4150,7 @@ function periodRange(period) {
   return { start, label: "du jour" };
 }
 
-function DailyReportModal({ sales, products, expenses, purchases, sellers, period = "day", gerantEmail, onClose }) {
+function DailyReportModal({ sales, products, expenses, purchases, sellers, period = "day", gerantEmail, alertPhones, onClose }) {
   const { start, label } = periodRange(period);
   const inRange = (t) => new Date(t) >= start;
   const todaySales = sales.filter((s) => inRange(s.date));
@@ -4182,8 +4245,10 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
             <span>{lowStock.length} article{lowStock.length > 1 ? "s" : ""} en stock bas : {lowStock.map((p) => p.name).join(", ")}</span>
           </div>
         )}
-        <button
-          onClick={() => {
+        <WaAlertButtons
+          phones={alertPhones}
+          label="💬 Envoyer ce rapport par WhatsApp"
+          text={(() => {
             const lines = [
               `📊 Rapport ${label}`,
               `Marge nette estimée : ${fmt(margin)} FCFA`,
@@ -4192,13 +4257,11 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
               topSeller ? `Meilleur vendeur : ${topSeller[0]} (${fmt(topSeller[1])} FCFA)` : null,
               lowStock.length > 0 ? `⚠️ Stock bas : ${lowStock.map((p) => p.name).join(", ")}` : null,
             ].filter(Boolean).join("\n");
-            window.open(`https://wa.me/?text=${encodeURIComponent(lines)}`, "_blank");
-          }}
+            return lines;
+          })()}
           className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
           style={{ background: "#25D36622", color: "#1B9E52", border: "1px solid #25D36655" }}
-        >
-          💬 Envoyer ce rapport par WhatsApp
-        </button>
+        />
         {gerantEmail && (
           <button
             onClick={() => {
@@ -4319,6 +4382,7 @@ function AppInner() {
   const [expenses, setExpenses, expensesLoaded] = useShared(k("expenses"), [], pendingRef, bumpSync);
   const [fedapayKey, setFedapayKey, fedapayKeyLoaded] = useShared(k("fedapayKey"), "", pendingRef, bumpSync);
   const [gerantEmail, setGerantEmail] = useShared(k("gerantEmail"), "", pendingRef, bumpSync);
+  const [alertPhones, setAlertPhones] = useShared(k("alertPhones"), [], pendingRef, bumpSync);
   const [loyaltyRate, setLoyaltyRate] = useShared(k("loyaltyRate"), 0, pendingRef, bumpSync);
   const [purchases, setPurchases, purchasesLoaded] = useShared(k("purchases"), [], pendingRef, bumpSync);
   const [closures, setClosures, closuresLoaded] = useShared(k("closures"), [], pendingRef, bumpSync);
@@ -5277,7 +5341,7 @@ function AppInner() {
       )}
 
       <main className="max-w-lg md:max-w-3xl mx-auto px-4 pb-4">
-        {tab === "stock" && <StockTab canEdit={canStock} depots={depots} categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
+        {tab === "stock" && <StockTab alertPhones={alertPhones} canEdit={canStock} depots={depots} categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
         {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} />}
         {tab === "clients" && <ClientsTab shopName={shopName} clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
         {tab === "inventaire" && <InventaireTab products={products} isAdmin={canStock} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
@@ -5347,6 +5411,8 @@ function AppInner() {
             setFedapayKey={setFedapayKey}
             gerantEmail={gerantEmail}
             setGerantEmail={setGerantEmail}
+            alertPhones={alertPhones}
+            setAlertPhones={setAlertPhones}
             sales={sales}
             products={products}
             expenses={expenses}
@@ -5392,7 +5458,7 @@ function AppInner() {
       )}
 
       {showDailyReport && (
-        <DailyReportModal sales={sales} products={products} expenses={expenses} gerantEmail={gerantEmail} onClose={() => setShowDailyReport(false)} />
+        <DailyReportModal sales={sales} products={products} expenses={expenses} gerantEmail={gerantEmail} alertPhones={alertPhones} onClose={() => setShowDailyReport(false)} />
       )}
 
       {endingService && currentUser && (
