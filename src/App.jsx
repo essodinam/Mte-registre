@@ -45,7 +45,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.6";
+const APP_VERSION = "3.9.7";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -4239,6 +4239,7 @@ function AppInner() {
   // Vérifie le statut d'abonnement du commerce : bloque intégralement l'accès
   // (y compris la connexion) dès que la période d'essai ou l'abonnement est expiré,
   // ou si aucune date d'abonnement n'est enregistrée pour ce commerce.
+  const [subTick, setSubTick] = useState(0); // incrémenté pour relancer la vérification (renouvellement détecté sans recharger)
   useEffect(() => {
     if (!shopId || shopId === TEST_SHOP_CODE || shopId.startsWith(DEMO_PREFIX)) { setSubBlocked(false); return; }
     let cancelled = false;
@@ -4258,7 +4259,17 @@ function AppInner() {
       }
     })();
     return () => { cancelled = true; };
-  }, [shopId]);
+  }, [shopId, subTick]);
+  // Tant que l'accès est suspendu, on revérifie toutes les 15 s et au retour sur l'onglet :
+  // dès que le développeur prolonge l'abonnement, le commerce se débloque tout seul.
+  useEffect(() => {
+    if (!subBlocked) return;
+    const again = () => setSubTick((n) => n + 1);
+    const id = setInterval(again, 15000);
+    const onVis = () => { if (document.visibilityState === "visible") again(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+  }, [subBlocked]);
   const [newShopCode, setNewShopCode] = useState(null); // affiché juste après une création de commerce
 
   useEffect(() => {
@@ -5088,6 +5099,13 @@ function AppInner() {
           >
             Contacter Moïse Tech Énergie
           </a>
+          <button
+            onClick={() => setSubTick((n) => n + 1)}
+            className="block w-full py-3 rounded-lg text-sm font-medium"
+            style={{ background: "#F0ECE3", color: "#1B1F1C", border: "1px solid #C08A3E" }}
+          >
+            J'ai renouvelé : vérifier à nouveau
+          </button>
           <button
             onClick={leaveShop}
             className="block w-full py-3 rounded-lg text-sm font-medium"
