@@ -45,7 +45,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.5";
+const APP_VERSION = "3.9.6";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -5088,6 +5088,13 @@ function AppInner() {
           >
             Contacter Moïse Tech Énergie
           </a>
+          <button
+            onClick={leaveShop}
+            className="block w-full py-3 rounded-lg text-sm font-medium"
+            style={{ background: "transparent", color: "#1B1F1C", border: "1px solid #DCD5C6" }}
+          >
+            ← Retour au menu
+          </button>
         </div>
       </div>
     );
