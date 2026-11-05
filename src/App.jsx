@@ -45,7 +45,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.10";
+const APP_VERSION = "3.9.12";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -146,7 +146,7 @@ async function registerBiometric(userKey, userName) {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge,
-      rp: { name: "Wuri" },
+      rp: { name: "KABATEC Consulting" },
       user: { id: userId, name: userKey, displayName: userName || userKey },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
@@ -179,7 +179,7 @@ async function adminBioRegister(role, auth) {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge: b64uBytes(pack.challenge),
-      rp: { name: "WURI CENTER", id: window.location.hostname },
+      rp: { name: "KABATEC Consulting", id: window.location.hostname },
       user: { id: crypto.getRandomValues(new Uint8Array(16)), name: `wuri-${role}`, displayName: role === "dev" ? "Développeur" : "Propriétaire" },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
@@ -287,20 +287,21 @@ function loadFedaPayScript(callback, onError) {
 }
 
 /* ---------- Logo Moïse Tech Énergie ---------- */
-function Logo({ size = 40, letter = "W" }) {
+function Logo({ size = 40, letter = WELCOME_LETTER }) {
   return (
     <svg width={size} height={size} viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
-      <rect x="8" y="8" width="224" height="224" rx="44" fill="#1B1F1C" />
+      <circle cx="120" cy="120" r="116" fill="#1B1F1C" />
       <text
-        x="120" y="165"
+        x="120" y="158"
         textAnchor="middle"
-        fontFamily="Georgia, 'Carlito', sans-serif"
+        fontFamily="Inter, 'Helvetica Neue', Arial, sans-serif"
         fontWeight="700"
-        fontSize="138"
+        fontSize="132"
         fill="#F0ECE3"
       >
         {letter}
       </text>
+      <rect x="92" y="176" width="56" height="5" rx="2" fill="#C08A3E" />
     </svg>
   );
 }
@@ -894,7 +895,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget 
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={56} />
-            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">KABATEC Consulting</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Code de ton commerce</p>
           </div>
           <input
@@ -1035,7 +1036,7 @@ function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCai
         )}
         <div className="text-center">
           <Logo size={56} />
-          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">KABATEC Consulting</h1>
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Qui utilise l'application ?</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -1972,7 +1973,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
             public_key: fedapayKey,
             transaction: {
               amount: total,
-              description: `Vente — ${shopName || "WURI CENTER"}`,
+              description: `Vente — ${shopName || "KABATEC Consulting"}`,
             },
             customer: selectedClient ? {
               firstname: selectedClient.name,
@@ -2740,7 +2741,7 @@ function PayslipModal({ data, year, month, onClose }) {
         </div>
 
         <p className="text-[10px]" style={{ color: "#16A34A" }}>
-          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans WURI CENTER pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
+          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans KABATEC Consulting pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
         </p>
 
         <button onClick={() => window.print()} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>
@@ -3928,7 +3929,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
                     const text = low.length === 0
                       ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                       : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
-                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "WURI CENTER"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "KABATEC Consulting"}`)}&body=${encodeURIComponent(text)}`, "_blank");
                   }}
                   className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
                   style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#DC4C3C" }}
@@ -3941,7 +3942,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
                     const todaySales = sales.filter((s) => new Date(s.date) >= start);
                     const total = todaySales.reduce((s, v) => s + v.total, 0);
                     const text = `${todaySales.length} vente(s)\nTotal : ${fmt(total)} FCFA`;
-                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "WURI CENTER"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "KABATEC Consulting"}`)}&body=${encodeURIComponent(text)}`, "_blank");
                   }}
                   className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
                   style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#16A34A" }}
@@ -3965,7 +3966,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = `wuri-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`;
+              a.download = `kabatec-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`;
               a.click();
               URL.revokeObjectURL(url);
             }}
@@ -4093,7 +4094,7 @@ function InstallBanner() {
         <Package size={20} className="shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold leading-tight" style={{ fontFamily: "'Carlito', sans-serif" }}>
-            Installe WURI CENTER sur ton téléphone
+            Installe KABATEC Consulting sur ton téléphone
           </p>
           <p className="text-[11px] leading-tight opacity-80">Accès plus rapide, fonctionne même hors connexion</p>
         </div>
@@ -4266,7 +4267,7 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
                 topSeller ? `Meilleur vendeur : ${topSeller[0]} (${fmt(topSeller[1])} FCFA)` : null,
                 lowStock.length > 0 ? `⚠️ Stock bas : ${lowStock.map((p) => p.name).join(", ")}` : null,
               ].filter(Boolean).join("\n");
-              const subject = `Rapport ${label} — WURI CENTER`;
+              const subject = `Rapport ${label} — KABATEC Consulting`;
               window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines)}`, "_blank");
             }}
             className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
@@ -5116,7 +5117,7 @@ function AppInner() {
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={60} />
-            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">WURI CENTER</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">KABATEC Consulting</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Choisis ton type de commerce pour commencer</p>
           </div>
           <div className="space-y-2">
@@ -5260,7 +5261,7 @@ function AppInner() {
               <Logo size={34} />
             )}
             <div>
-              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">WURI CENTER</h1>
+              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">KABATEC Consulting</h1>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <p className="text-xs" style={{ color: "#16A34A" }}>{BUSINESS_TYPES[businessType].icon} {currentUser.name}</p>
                 {isOpenNow !== null && (
@@ -5498,7 +5499,7 @@ function SplashScreen({ onDone }) {
         <Logo size={84} />
       </div>
       <p className="wuri-splash-text mt-5 text-lg" style={{ fontFamily: "'Carlito', sans-serif", color: "#F0ECE3" }}>
-        Bienvenue chez WURI CENTER
+        Bienvenue chez KABATEC Consulting
       </p>
       <p className="wuri-splash-text mt-1 text-xs" style={{ color: "#8A6A2E" }}>
         Gestion de commerce, simplement
