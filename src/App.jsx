@@ -45,7 +45,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.12";
+const APP_VERSION = "3.9.17";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -968,9 +968,17 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget 
           Espace gérant — créer un commerce
         </button>
         {onDemo && (
-          <button onClick={onDemo} className="w-full text-center text-xs flex items-center justify-center gap-1.5" style={{ color: "#6B6558" }}>
-            <Sparkles size={12} /> Essayer une démo (données fictives, code gérant 0000, valable 24 h)
-          </button>
+          <div className="flex justify-center">
+            <button
+              onClick={onDemo}
+              aria-label="Essayer la démo"
+              title="Démo"
+              className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E66" }}
+            >
+              <Sparkles size={18} />
+            </button>
+          </div>
         )}
         <div className="flex justify-center pt-2">
           <button
@@ -1131,7 +1139,7 @@ function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, 
     return c;
   }, [products]);
   const filtered = useMemo(
-    () => products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) && (!catFilter || p.category === catFilter) && (!depotFilter || depotOf(p) === depotFilter)),
+    () => products.filter((p) => productSearchText(p).includes(query.toLowerCase()) && (!catFilter || p.category === catFilter) && (!depotFilter || depotOf(p) === depotFilter)),
     [products, query, catFilter, depotFilter]
   );
   const stockValue = (list) => list.reduce((sum, p) => sum + (Number(p.stock) || 0) * (Number(p.costPrice) || Number(p.price) || 0), 0);
@@ -1217,7 +1225,7 @@ function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, 
                       {p.name}
                       {p.hasCodes && <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "#C08A3E22", color: "#C08A3E" }}>🔑 codes</span>}
                     </div>
-                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.category}{depotsAll.length > 1 ? ` · ${depotOf(p)}` : ""}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.category}{productMeta(p) ? ` · ${productMeta(p)}` : ""}{depotsAll.length > 1 ? ` · ${depotOf(p)}` : ""}</div>
                   </div>
                 </div>
                 <div className="text-right">
@@ -1255,7 +1263,12 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
   const codes = form.codes || [];
   const unusedCount = codes.filter((c) => !c.used).length;
   const usedCount = codes.length - unusedCount;
-  const valid = form.name.trim() && form.price !== "" && (form.hasCodes ? true : form.stock !== "");
+  const needsRef = isTileCat(form.category);
+  const isElectro = isElectroCat(form.category);
+  const isElec = isElecCat(form.category);
+  const isSanit = isSanitCat(form.category);
+  const needsBM = isElectro && !(String(form.brand || "").trim() && String(form.model || "").trim());
+  const valid = form.name.trim() && (!needsRef || String(form.reference || "").trim()) && !needsBM && form.price !== "" && (form.hasCodes ? true : form.stock !== "");
 
   const handlePhotoChange = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -1336,6 +1349,95 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
             <select value={form.category} onChange={(e) => set("category", e.target.value)} className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>
               {allCategoriesOf(categories || BUSINESS_TYPES[businessType].categories, form.category ? [{ category: form.category }] : []).map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+          </div>
+
+          <div>
+            <label className="text-xs" style={{ color: "#6B6558" }}>Référence {needsRef ? "(obligatoire pour les carreaux)" : "(optionnel)"}</label>
+            <input value={form.reference || ""} onChange={(e) => set("reference", e.target.value)} placeholder="Ex. CB-6060-12, beige brillant 60x60" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: `1px solid ${needsRef && !String(form.reference || "").trim() ? "#DC4C3C" : "#DCD5C6"}`, color: "#1B1F1C" }} />
+          </div>
+
+          {needsRef && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Format</label>
+                <input value={form.tileFormat || ""} onChange={(e) => set("tileFormat", e.target.value)} placeholder="Ex. 60x60" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>m² par carton</label>
+                <input type="number" step="0.01" inputMode="decimal" value={form.m2PerBox ?? ""} onChange={(e) => set("m2PerBox", e.target.value)} placeholder="Ex. 1.44" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+              {parseFloat(form.m2PerBox) > 0 && parseFloat(form.stock) > 0 && /carton/i.test(form.unit || "") && (
+                <div className="col-span-2 text-xs" style={{ color: "#6B6558" }}>
+                  Stock : {form.stock} carton(s) = {(parseFloat(form.stock) * parseFloat(form.m2PerBox)).toFixed(2).replace(".", ",")} m²
+                </div>
+              )}
+            </div>
+          )}
+
+          {isElectro && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs" style={{ color: "#6B6558" }}>Marque (obligatoire)</label>
+                  <input value={form.brand || ""} onChange={(e) => set("brand", e.target.value)} placeholder="Ex. Hisense" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: `1px solid ${!String(form.brand || "").trim() ? "#DC4C3C" : "#DCD5C6"}`, color: "#1B1F1C" }} />
+                </div>
+                <div>
+                  <label className="text-xs" style={{ color: "#6B6558" }}>Modèle (obligatoire)</label>
+                  <input value={form.model || ""} onChange={(e) => set("model", e.target.value)} placeholder="Ex. RS-60" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: `1px solid ${!String(form.model || "").trim() ? "#DC4C3C" : "#DCD5C6"}`, color: "#1B1F1C" }} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Numéro de série (optionnel)</label>
+                <input value={form.serial || ""} onChange={(e) => set("serial", e.target.value)} placeholder="N° de l'appareil" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+                <div>
+                  <label className="text-xs" style={{ color: "#6B6558" }}>Garantie (mois)</label>
+                  <input type="number" inputMode="numeric" value={form.warrantyMonths ?? ""} onChange={(e) => set("warrantyMonths", e.target.value)} placeholder="Ex. 12" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Caractéristiques (capacité, puissance, nombre de feux…)</label>
+                <input value={form.specs || ""} onChange={(e) => set("specs", e.target.value)} placeholder="Ex. 4 feux gaz, 60 cm" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+            </div>
+          )}
+
+          {(isElec || isSanit) && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Marque (optionnel)</label>
+                <input value={form.brand || ""} onChange={(e) => set("brand", e.target.value)} placeholder="Ex. Legrand" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>{isElec ? "Calibre / section / puissance" : "Dimensions / diamètre"}</label>
+                <input value={form.sizeSpec || ""} onChange={(e) => set("sizeSpec", e.target.value)} placeholder="Ex. 2,5 mm², 16 A, 12 W" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Matière (optionnel)</label>
+                <input value={form.material || ""} onChange={(e) => set("material", e.target.value)} placeholder="Ex. PVC, PPR, inox" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+                <div>
+                  <label className="text-xs" style={{ color: "#6B6558" }}>Longueur d'un rouleau / d'une barre (m)</label>
+                  <input type="number" step="any" inputMode="decimal" value={form.rollLength ?? ""} onChange={(e) => set("rollLength", e.target.value)} placeholder="Ex. 100" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+                </div>
+              </div>
+              <p className="text-[11px]" style={{ color: "#6B6558" }}>Pour vendre au mètre : coche « Vendu au détail », mets l'unité « m » et le prix au mètre.</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Fournisseur (optionnel)</label>
+                <input value={form.supplier || ""} onChange={(e) => set("supplier", e.target.value)} placeholder="Ex. Lomé Carrelage" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
+              <div>
+                <label className="text-xs" style={{ color: "#6B6558" }}>Emplacement (optionnel)</label>
+                <input value={form.location || ""} onChange={(e) => set("location", e.target.value)} placeholder="Ex. Rayon B, étagère 2" className="w-full mt-1 px-3 py-2 rounded-md text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+              </div>
           </div>
 
           {depots && depots.length > 1 && (
@@ -1451,7 +1553,7 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
           )}
           <button
             disabled={!valid}
-            onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, costPrice: form.costPrice === "" || form.costPrice == null ? null : parseFloat(form.costPrice) || 0, stock: form.hasCodes ? unusedCount : (form.decimal ? round3(parseFloat(form.stock) || 0) : (parseInt(form.stock) || 0)), wholesalePrice: form.wholesalePrice === "" || form.wholesalePrice == null ? null : parseFloat(form.wholesalePrice) || null, depot: form.depot || (depots && depots[0]) || "", threshold: form.decimal ? (parseFloat(form.threshold) || 0) : (parseInt(form.threshold) || 0), unit: form.hasCodes ? "code" : form.unit })}
+            onClick={() => onSave({ ...form, warrantyMonths: form.warrantyMonths === "" || form.warrantyMonths == null ? null : parseInt(form.warrantyMonths) || null, rollLength: form.rollLength === "" || form.rollLength == null ? null : parseFloat(form.rollLength) || null, m2PerBox: form.m2PerBox === "" || form.m2PerBox == null ? null : parseFloat(form.m2PerBox) || null, price: parseFloat(form.price) || 0, costPrice: form.costPrice === "" || form.costPrice == null ? null : parseFloat(form.costPrice) || 0, stock: form.hasCodes ? unusedCount : (form.decimal ? round3(parseFloat(form.stock) || 0) : (parseInt(form.stock) || 0)), wholesalePrice: form.wholesalePrice === "" || form.wholesalePrice == null ? null : parseFloat(form.wholesalePrice) || null, depot: form.depot || (depots && depots[0]) || "", threshold: form.decimal ? (parseFloat(form.threshold) || 0) : (parseInt(form.threshold) || 0), unit: form.hasCodes ? "code" : form.unit })}
             className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
             style={{ background: "#C08A3E", color: "#F0ECE3" }}
           >
@@ -1465,6 +1567,28 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
 
 /* ---------- Vente ---------- */
 /* ---------- Ticket de caisse ---------- */
+/* ---------- Champs propres à chaque famille d'articles ---------- */
+const isTileCat = (c) => /carreau/i.test(c || "");
+const isElectroCat = (c) => /[ée]lectrom[ée]nager/i.test(c || "");
+const isElecCat = (c) => /[ée]lectricit[ée]/i.test(c || "");
+const isSanitCat = (c) => /sanitaire|plomberie/i.test(c || "");
+const productMeta = (p) => {
+  const parts = [];
+  const bm = [p.brand, p.model].filter(Boolean).join(" ");
+  if (bm) parts.push(bm);
+  if (p.reference) parts.push(`Réf. ${p.reference}`);
+  if (p.tileFormat) parts.push(p.tileFormat);
+  if (p.m2PerBox) parts.push(`${String(p.m2PerBox).replace(".", ",")} m²/carton`);
+  if (p.sizeSpec) parts.push(p.sizeSpec);
+  if (p.material) parts.push(p.material);
+  if (p.rollLength) parts.push(`${String(p.rollLength).replace(".", ",")} m/rouleau`);
+  if (p.warrantyMonths) parts.push(`garantie ${p.warrantyMonths} mois`);
+  if (p.location) parts.push(`📍 ${p.location}`);
+  return parts.join(" · ");
+};
+const productSearchText = (p) => [p.name, p.reference, p.brand, p.model, p.serial, p.supplier, p.sizeSpec].filter(Boolean).join(" ").toLowerCase();
+const addMonthsFr = (ts, m) => { const d = new Date(ts); d.setMonth(d.getMonth() + (parseInt(m) || 0)); return d.toLocaleDateString("fr-FR"); };
+
 function ReceiptModal({ receipt, onClose, format = "58mm" }) {
   const { shopName, businessTypeLabel, items, total, date, cashierName, clientName, clientPhone, paymentMethod } = receipt;
   const d = new Date(date);
@@ -1514,6 +1638,9 @@ function ReceiptModal({ receipt, onClose, format = "58mm" }) {
                 <span>{fmt(i.qty * i.price)} FCFA</span>
               </div>
               <div className="text-[10px] opacity-70">{i.qty} × {fmt(i.price)} FCFA</div>
+              {(i.brandModel || i.reference) && <div className="text-[10px] opacity-70">{[i.brandModel, i.reference ? `Réf. ${i.reference}` : ""].filter(Boolean).join(" · ")}</div>}
+              {i.serial && <div className="text-[10px] opacity-70">N° série : {i.serial}</div>}
+              {i.warrantyMonths > 0 && <div className="text-[10px] font-semibold">Garantie {i.warrantyMonths} mois (jusqu'au {addMonthsFr(date, i.warrantyMonths)})</div>}
               {i.codes && i.codes.length > 0 && (
                 <div className="text-[11px] mt-0.5 font-semibold">Code{i.codes.length > 1 ? "s" : ""} : {i.codes.join(", ")}</div>
               )}
@@ -1921,7 +2048,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
       if (existing.qty >= p.stock) return c;
       return c.map((i) => (i.id === p.id ? { ...i, qty: round3(Math.min(p.stock, i.qty + stepOf(i))) } : i));
     }
-    return p.stock > 0 ? [...c, { id: p.id, name: p.name, price: p.price, unit: p.unit, qty: 1, decimal: !!p.decimal, priceRetail: p.price, priceWholesale: p.wholesalePrice || null, mode: "detail" }] : c;
+    return p.stock > 0 ? [...c, { id: p.id, name: p.name, price: p.price, unit: p.unit, qty: 1, decimal: !!p.decimal, m2PerBox: p.m2PerBox || null, warrantyMonths: p.warrantyMonths || null, brandModel: [p.brand, p.model].filter(Boolean).join(" ") || null, serial: p.serial || null, reference: p.reference || null, priceRetail: p.price, priceWholesale: p.wholesalePrice || null, mode: "detail" }] : c;
   });
   const dec = (id) => setCart((c) => c.map((i) => (i.id === id ? { ...i, qty: round3(i.qty - stepOf(i)) } : i)).filter((i) => i.qty > 0));
   const inc = (id) => setCart((c) => {
@@ -2019,7 +2146,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
   const [scanMsg, setScanMsg] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const cats = allCategoriesOf(categories || [], products);
-  const visibleProducts = products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) && (!catFilter || p.category === catFilter));
+  const visibleProducts = products.filter((p) => productSearchText(p).includes(query.toLowerCase()) && (!catFilter || p.category === catFilter));
 
   const handleScanned = (code) => {
     setScannerOpen(false);
@@ -2065,7 +2192,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
                   </div>
                   <div className="min-w-0">
                     <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px]">{p.name}</div>
-                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{p.stock} {p.unit} dispo</div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{productMeta(p) ? `${productMeta(p)} · ` : ""}{p.stock} {p.unit} dispo</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2082,7 +2209,8 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
         <div className="fixed bottom-16 md:bottom-4 left-0 right-0 mx-auto max-w-lg px-4">
           <div className="rounded-xl p-4 space-y-2" style={{ background: "#FFFFFF", border: "1px solid #C08A3E55", boxShadow: "0 -8px 24px #00000055" }}>
             {cart.map((i) => (
-              <div key={i.id} className="flex items-center justify-between text-sm gap-2">
+              <React.Fragment key={i.id}>
+              <div className="flex items-center justify-between text-sm gap-2">
                 <div className="min-w-0">
                   <span style={{ color: "#1B1F1C" }} className="block truncate">{i.name}</span>
                   <span className="text-[11px] flex items-center gap-1.5" style={{ color: "#6B6558" }}>
@@ -2113,6 +2241,26 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
                   <button onClick={() => inc(i.id)} className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "#DCD5C6", color: "#1B1F1C" }}><Plus size={12} /></button>
                 </div>
               </div>
+              {i.m2PerBox > 0 && !i.decimal && (
+                <div className="flex items-center justify-between gap-2 text-[11px] -mt-1 pl-1" style={{ color: "#6B6558" }}>
+                  <span className="flex items-center gap-1.5">
+                    Surface à couvrir
+                    <input
+                      type="number"
+                      step="any"
+                      inputMode="decimal"
+                      placeholder="m²"
+                      onBlur={(e) => { if (e.target.value) { setQty(i.id, Math.ceil(parseFloat(String(e.target.value).replace(",", ".")) / i.m2PerBox - 1e-9)); e.target.value = ""; } }}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                      className="w-16 text-center rounded-md outline-none py-0.5"
+                      style={{ color: "#1B1F1C", background: "#F0ECE3", border: "1px solid #DCD5C6" }}
+                    />
+                    m²
+                  </span>
+                  <span>{i.qty} carton{i.qty > 1 ? "s" : ""} = {(i.qty * i.m2PerBox).toFixed(2).replace(".", ",")} m²</span>
+                </div>
+              )}
+              </React.Fragment>
             ))}
 
             <button onClick={() => setPickerOpen(true)} className="w-full flex items-center justify-between py-1.5 text-sm" style={{ color: "#6B6558" }}>
