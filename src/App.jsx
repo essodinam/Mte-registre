@@ -23,6 +23,7 @@ const BUSINESS_TYPES = {
   bar: { label: "Bar / Restauration", icon: "🍷", categories: ["Boissons", "Plats", "Snacks"] },
   menuiserie: { label: "Menuiserie", icon: "🪵", categories: ["Bois", "Panneaux", "Quincaillerie bois", "Outils"] },
   quincaillerie: { label: "Quincaillerie", icon: "🔩", categories: ["Outillage", "Fixations", "Peinture", "Électricité", "Plomberie"] },
+  service: { label: "Prestation de service", icon: "🛠️", isService: true, categories: ["Installation", "Maintenance", "Conseil", "Formation", "Réseau et caméras", "Électricité", "Déplacement"] },
 };
 
 /* ---------- Code d'accès pour créer un nouveau commerce ----------
@@ -45,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.17";
+const APP_VERSION = "3.9.18";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -1144,7 +1145,7 @@ function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, 
   );
   const stockValue = (list) => list.reduce((sum, p) => sum + (Number(p.stock) || 0) * (Number(p.costPrice) || Number(p.price) || 0), 0);
   const catValue = stockValue(filtered);
-  const lowStock = products.filter((p) => p.stock <= p.threshold);
+  const lowStock = products.filter((p) => !p.isService && p.stock <= p.threshold);
   const expiring = products.filter((p) => p.expiryDate && daysUntil(p.expiryDate) <= 7);
 
   return (
@@ -1229,8 +1230,8 @@ function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, 
                   </div>
                 </div>
                 <div className="text-right">
-                  <div style={{ fontFamily: "'Carlito', sans-serif", color: p.stock <= p.threshold ? "#DC4C3C" : "#1B1F1C" }} className="text-sm">
-                    {p.stock} {p.unit}
+                  <div style={{ fontFamily: "'Carlito', sans-serif", color: !p.isService && p.stock <= p.threshold ? "#DC4C3C" : "#1B1F1C" }} className="text-sm">
+                    {p.isService ? "Prestation" : `${p.stock} ${p.unit}`}
                   </div>
                   <div style={{ fontFamily: "'Carlito', sans-serif", color: "#C08A3E" }} className="text-xs mt-0.5">
                     {fmt(p.price)} FCFA
@@ -1254,7 +1255,7 @@ function StockTab({ products, isAdmin, canEdit, onOpenProduct, onRequestGerant, 
 function ProductModal({ product, businessType, categories, depots, canDelete, shopId, onSave, onDelete, onClose }) {
   const isNew = !product?.id;
   const [form, setForm] = useState(
-    product || { id: uid(), name: "", category: (categories && categories[0]) || BUSINESS_TYPES[businessType].categories[0], depot: (depots && depots[0]) || "", decimal: false, wholesalePrice: "", price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
+    product || { id: uid(), name: "", category: (categories && categories[0]) || BUSINESS_TYPES[businessType].categories[0], depot: (depots && depots[0]) || "", decimal: false, isService: !!BUSINESS_TYPES[businessType]?.isService, wholesalePrice: "", price: "", stock: "", unit: "u", threshold: 3, hasCodes: false, codes: [] }
   );
   const [newCodesText, setNewCodesText] = useState("");
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -1268,7 +1269,7 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
   const isElec = isElecCat(form.category);
   const isSanit = isSanitCat(form.category);
   const needsBM = isElectro && !(String(form.brand || "").trim() && String(form.model || "").trim());
-  const valid = form.name.trim() && (!needsRef || String(form.reference || "").trim()) && !needsBM && form.price !== "" && (form.hasCodes ? true : form.stock !== "");
+  const valid = form.name.trim() && (!needsRef || String(form.reference || "").trim()) && !needsBM && form.price !== "" && (form.hasCodes || form.isService ? true : form.stock !== "");
 
   const handlePhotoChange = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -1501,7 +1502,12 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
             <span className="text-sm" style={{ color: "#1B1F1C" }}>Codes uniques (tickets WiFi, cartes prépayées…)</span>
           </label>
 
-          {form.hasCodes ? (
+          <label className="flex items-center gap-2.5 py-1 cursor-pointer select-none">
+            <input type="checkbox" checked={!!form.isService} onChange={(e) => setForm((f) => ({ ...f, isService: e.target.checked, hasCodes: e.target.checked ? false : f.hasCodes }))} className="w-4 h-4" />
+            <span className="text-sm" style={{ color: "#1B1F1C" }}>Prestation de service (pas de stock à suivre)</span>
+          </label>
+
+          {form.isService ? null : form.hasCodes ? (
             <div className="space-y-2">
               <div className="rounded-lg p-3 flex items-center justify-between text-sm" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
                 <span style={{ color: "#6B6558" }}>Codes disponibles</span>
@@ -1553,7 +1559,7 @@ function ProductModal({ product, businessType, categories, depots, canDelete, sh
           )}
           <button
             disabled={!valid}
-            onClick={() => onSave({ ...form, warrantyMonths: form.warrantyMonths === "" || form.warrantyMonths == null ? null : parseInt(form.warrantyMonths) || null, rollLength: form.rollLength === "" || form.rollLength == null ? null : parseFloat(form.rollLength) || null, m2PerBox: form.m2PerBox === "" || form.m2PerBox == null ? null : parseFloat(form.m2PerBox) || null, price: parseFloat(form.price) || 0, costPrice: form.costPrice === "" || form.costPrice == null ? null : parseFloat(form.costPrice) || 0, stock: form.hasCodes ? unusedCount : (form.decimal ? round3(parseFloat(form.stock) || 0) : (parseInt(form.stock) || 0)), wholesalePrice: form.wholesalePrice === "" || form.wholesalePrice == null ? null : parseFloat(form.wholesalePrice) || null, depot: form.depot || (depots && depots[0]) || "", threshold: form.decimal ? (parseFloat(form.threshold) || 0) : (parseInt(form.threshold) || 0), unit: form.hasCodes ? "code" : form.unit })}
+            onClick={() => onSave({ ...form, warrantyMonths: form.warrantyMonths === "" || form.warrantyMonths == null ? null : parseInt(form.warrantyMonths) || null, rollLength: form.rollLength === "" || form.rollLength == null ? null : parseFloat(form.rollLength) || null, m2PerBox: form.m2PerBox === "" || form.m2PerBox == null ? null : parseFloat(form.m2PerBox) || null, price: parseFloat(form.price) || 0, costPrice: form.costPrice === "" || form.costPrice == null ? null : parseFloat(form.costPrice) || 0, stock: form.isService ? 999999 : form.hasCodes ? unusedCount : (form.decimal ? round3(parseFloat(form.stock) || 0) : (parseInt(form.stock) || 0)), wholesalePrice: form.wholesalePrice === "" || form.wholesalePrice == null ? null : parseFloat(form.wholesalePrice) || null, depot: form.depot || (depots && depots[0]) || "", threshold: form.isService ? 0 : form.decimal ? (parseFloat(form.threshold) || 0) : (parseInt(form.threshold) || 0), unit: form.hasCodes ? "code" : form.unit })}
             className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40"
             style={{ background: "#C08A3E", color: "#F0ECE3" }}
           >
@@ -2192,7 +2198,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
                   </div>
                   <div className="min-w-0">
                     <div style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }} className="text-[15px]">{p.name}</div>
-                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{productMeta(p) ? `${productMeta(p)} · ` : ""}{p.stock} {p.unit} dispo</div>
+                    <div className="text-xs mt-0.5" style={{ color: "#6B6558" }}>{productMeta(p) ? `${productMeta(p)} · ` : ""}{p.isService ? "Prestation" : `${p.stock} ${p.unit} dispo`}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -4049,7 +4055,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
               phones={alertPhones}
               label="⚠️ Envoyer l'alerte stock bas"
               text={(() => {
-                const low = products.filter((p) => p.stock <= p.threshold);
+                const low = products.filter((p) => !p.isService && p.stock <= p.threshold);
                 return low.length === 0
                   ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                   : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
@@ -4073,7 +4079,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
               <>
                 <button
                   onClick={() => {
-                    const low = products.filter((p) => p.stock <= p.threshold);
+                    const low = products.filter((p) => !p.isService && p.stock <= p.threshold);
                     const text = low.length === 0
                       ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                       : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
@@ -4319,7 +4325,7 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
   todaySales.forEach((s) => { sellerTotals[s.sellerName] = (sellerTotals[s.sellerName] || 0) + s.total; });
   const topSeller = Object.entries(sellerTotals).sort((a, b) => b[1] - a[1])[0];
 
-  const lowStock = products.filter((p) => p.stock <= p.threshold);
+  const lowStock = products.filter((p) => !p.isService && p.stock <= p.threshold);
 
   // Mini graphique : total des ventes des 7 derniers jours
   const last7 = useMemo(() => {
@@ -4910,7 +4916,7 @@ function AppInner() {
     return closeMin > openMin ? nowMin >= openMin && nowMin < closeMin : nowMin >= openMin || nowMin < closeMin;
   }, [hours]);
 
-  const lowStockCount = useMemo(() => products.filter((p) => p.stock <= p.threshold).length, [products]);
+  const lowStockCount = useMemo(() => products.filter((p) => !p.isService && p.stock <= p.threshold).length, [products]);
 
   const confirmSignature = async (signature) => {
     // Vérifie que la prise de service se fait bien sur place : on compare la
@@ -5047,6 +5053,7 @@ function AppInner() {
     setProducts((prev) => prev.map((p) => {
       const item = cartItems.find((i) => i.id === p.id);
       if (!item) return p;
+      if (p.isService) return p;
       if (p.hasCodes) {
         const unused = (p.codes || []).filter((c) => !c.used);
         const toAssign = unused.slice(0, item.qty);
