@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.18";
+const APP_VERSION = "3.9.20";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -1840,6 +1840,140 @@ function ClientDetail({ client, sales, isAdmin, onUpdate, onRemove, onClose, onR
           )
         )}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Chantiers (prestations de service) : suivi, acomptes, reste à payer ---------- */
+const JOB_STATUS = [
+  { id: "devis", label: "Devis", color: "#6B6558" },
+  { id: "en_cours", label: "En cours", color: "#C08A3E" },
+  { id: "termine", label: "Terminé", color: "#2563EB" },
+  { id: "paye", label: "Payé", color: "#16A34A" },
+];
+const jobPaid = (j) => (j.deposits || []).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+const jobLeft = (j) => Math.max(0, (Number(j.total) || 0) - jobPaid(j));
+
+function ChantiersTab({ jobs, setJobs, isAdmin, shopName }) {
+  const [filter, setFilter] = useState("");
+  const [editing, setEditing] = useState(null); // chantier en cours d'édition (objet) ou null
+  const [depositFor, setDepositFor] = useState(null);
+  const [depositAmount, setDepositAmount] = useState("");
+
+  const blank = () => ({ id: uid(), title: "", client: "", phone: "", place: "", date: new Date().toISOString().slice(0, 10), status: "devis", total: "", notes: "", deposits: [], createdAt: Date.now(), _new: true });
+  const list = (jobs || []).filter((j) => !filter || j.status === filter).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const owed = (jobs || []).filter((j) => j.status !== "devis").reduce((s, j) => s + jobLeft(j), 0);
+  const upd = (id, patch) => setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+
+  const save = () => {
+    const { _new, ...j } = editing;
+    const clean = { ...j, total: parseFloat(j.total) || 0, title: j.title.trim(), client: j.client.trim(), phone: j.phone.trim() };
+    setJobs((prev) => (_new ? [...prev, clean] : prev.map((x) => (x.id === clean.id ? clean : x))));
+    setEditing(null);
+  };
+  const addDeposit = (j) => {
+    const amount = parseFloat(String(depositAmount).replace(",", "."));
+    if (!(amount > 0)) return;
+    const deposits = [...(j.deposits || []), { id: uid(), amount: Math.min(amount, jobLeft(j) || amount), date: Date.now() }];
+    const paidAll = (Number(j.total) || 0) > 0 && deposits.reduce((s, d) => s + d.amount, 0) >= Number(j.total);
+    upd(j.id, { deposits, status: paidAll ? "paye" : j.status });
+    setDepositAmount("");
+    setDepositFor(null);
+  };
+  const remind = (j) => {
+    const msg = `Bonjour ${j.client || ""}, concernant « ${j.title} » chez ${shopName || "KABATEC Consulting"} : total ${fmt(j.total)} FCFA, déjà réglé ${fmt(jobPaid(j))} FCFA, reste à payer ${fmt(jobLeft(j))} FCFA. Merci !`;
+    window.open(`https://wa.me/${j.phone ? waPhone(j.phone) : ""}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+  const input = "w-full mt-1 px-3 py-2 rounded-md text-sm outline-none";
+  const inStyle = { background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" };
+
+  if (editing) {
+    const set = (k, v) => setEditing((e) => ({ ...e, [k]: v }));
+    const ok = editing.title.trim() && editing.client.trim() && parseFloat(editing.total) > 0;
+    return (
+      <div className="space-y-3 pb-24">
+        <h3 className="text-lg" style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{editing._new ? "Nouveau chantier" : "Modifier le chantier"}</h3>
+        <div><label className="text-xs" style={{ color: "#6B6558" }}>Prestation</label><input value={editing.title} onChange={(e) => set("title", e.target.value)} placeholder="Ex. Installation de 4 caméras" className={input} style={inStyle} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-xs" style={{ color: "#6B6558" }}>Client</label><input value={editing.client} onChange={(e) => set("client", e.target.value)} className={input} style={inStyle} /></div>
+          <div><label className="text-xs" style={{ color: "#6B6558" }}>Téléphone</label><input value={editing.phone} onChange={(e) => set("phone", e.target.value)} inputMode="tel" className={input} style={inStyle} /></div>
+        </div>
+        <div><label className="text-xs" style={{ color: "#6B6558" }}>Lieu d'intervention</label><input value={editing.place} onChange={(e) => set("place", e.target.value)} className={input} style={inStyle} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-xs" style={{ color: "#6B6558" }}>Date prévue</label><input type="date" value={editing.date} onChange={(e) => set("date", e.target.value)} className={input} style={inStyle} /></div>
+          <div><label className="text-xs" style={{ color: "#6B6558" }}>Montant total (FCFA)</label><input type="number" inputMode="numeric" value={editing.total} onChange={(e) => set("total", e.target.value)} className={input} style={inStyle} /></div>
+        </div>
+        <div>
+          <label className="text-xs" style={{ color: "#6B6558" }}>Statut</label>
+          <div className="grid grid-cols-4 gap-1.5 mt-1">
+            {JOB_STATUS.map((s) => (
+              <button key={s.id} onClick={() => set("status", s.id)} className="py-2 rounded-md text-xs" style={{ background: editing.status === s.id ? `${s.color}22` : "#F0ECE3", color: editing.status === s.id ? s.color : "#6B6558", border: `1px solid ${editing.status === s.id ? s.color : "#DCD5C6"}` }}>{s.label}</button>
+            ))}
+          </div>
+        </div>
+        <div><label className="text-xs" style={{ color: "#6B6558" }}>Notes</label><textarea rows={3} value={editing.notes} onChange={(e) => set("notes", e.target.value)} className={input} style={inStyle} /></div>
+        <div className="flex gap-2 pt-1">
+          {!editing._new && isAdmin && (
+            <button onClick={() => { if (window.confirm("Supprimer ce chantier ?")) { setJobs((p) => p.filter((x) => x.id !== editing.id)); setEditing(null); } }} className="px-4 py-2.5 rounded-lg text-sm flex items-center gap-2" style={{ background: "#DC4C3C1A", color: "#DC4C3C", border: "1px solid #DC4C3C55" }}><Trash2 size={16} /> Supprimer</button>
+          )}
+          <button onClick={() => setEditing(null)} className="px-4 py-2.5 rounded-lg text-sm" style={{ background: "#F0ECE3", color: "#6B6558", border: "1px solid #DCD5C6" }}>Annuler</button>
+          <button disabled={!ok} onClick={save} className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#C08A3E", color: "#F0ECE3" }}>Enregistrer</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 pb-24">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg" style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>Chantiers</h3>
+          <p className="text-xs" style={{ color: owed > 0 ? "#DC4C3C" : "#6B6558" }}>{owed > 0 ? `Reste à encaisser : ${fmt(owed)} FCFA` : "Rien à encaisser"}</p>
+        </div>
+        <button onClick={() => setEditing(blank())} className="px-3 py-2 rounded-lg text-sm flex items-center gap-1.5" style={{ background: "#C08A3E", color: "#F0ECE3" }}><Plus size={15} /> Nouveau</button>
+      </div>
+      <div className="flex gap-1.5 overflow-x-auto">
+        {[{ id: "", label: "Tous" }, ...JOB_STATUS].map((s) => (
+          <button key={s.id} onClick={() => setFilter(s.id)} className="px-3 py-1.5 rounded-full text-xs whitespace-nowrap" style={{ background: filter === s.id ? "#1B1F1C" : "#F0ECE3", color: filter === s.id ? "#EDE6D6" : "#6B6558", border: "1px solid #DCD5C6" }}>{s.label}</button>
+        ))}
+      </div>
+      {list.length === 0 ? (
+        <p className="text-sm text-center py-8" style={{ color: "#6B6558" }}>Aucun chantier. Appuie sur « Nouveau » pour en créer un.</p>
+      ) : (
+        list.map((j) => {
+          const st = JOB_STATUS.find((s) => s.id === j.status) || JOB_STATUS[0];
+          const left = jobLeft(j);
+          return (
+            <div key={j.id} className="rounded-xl p-3 space-y-2" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+              <div className="flex items-start justify-between gap-2">
+                <button onClick={() => setEditing(j)} className="text-left min-w-0">
+                  <div className="text-[15px] truncate" style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }}>{j.title}</div>
+                  <div className="text-xs" style={{ color: "#6B6558" }}>{j.client}{j.place ? ` · ${j.place}` : ""}{j.date ? ` · ${new Date(j.date).toLocaleDateString("fr-FR")}` : ""}</div>
+                </button>
+                <span className="text-[10px] px-2 py-0.5 rounded-full shrink-0" style={{ background: `${st.color}22`, color: st.color, border: `1px solid ${st.color}55` }}>{st.label}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs" style={{ color: "#6B6558" }}>
+                <span>Total {fmt(j.total)} · payé {fmt(jobPaid(j))}</span>
+                <span style={{ color: left > 0 ? "#DC4C3C" : "#16A34A", fontWeight: 600 }}>{left > 0 ? `Reste ${fmt(left)} FCFA` : "Soldé"}</span>
+              </div>
+              {depositFor === j.id ? (
+                <div className="flex gap-2">
+                  <input autoFocus type="number" inputMode="numeric" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="Montant reçu" className="flex-1 px-3 py-1.5 rounded-md text-sm outline-none" style={inStyle} />
+                  <button onClick={() => addDeposit(j)} className="px-3 rounded-md text-sm" style={{ background: "#16A34A", color: "#FFFFFF" }}>OK</button>
+                  <button onClick={() => { setDepositFor(null); setDepositAmount(""); }} className="px-2 rounded-md text-sm" style={{ color: "#6B6558" }}>✕</button>
+                </div>
+              ) : (
+                <div className="flex gap-2 flex-wrap">
+                  {left > 0 && <button onClick={() => setDepositFor(j.id)} className="px-3 py-1.5 rounded-md text-xs" style={{ background: "#16A34A1A", color: "#16A34A", border: "1px solid #16A34A55" }}>+ Acompte / paiement</button>}
+                  {left > 0 && j.phone && <button onClick={() => remind(j)} className="px-3 py-1.5 rounded-md text-xs" style={{ background: "#25D36622", color: "#1B9E52", border: "1px solid #25D36655" }}>Rappel WhatsApp</button>}
+                  {j.status === "devis" && <button onClick={() => upd(j.id, { status: "en_cours" })} className="px-3 py-1.5 rounded-md text-xs" style={{ background: "#F0ECE3", color: "#6B6558", border: "1px solid #DCD5C6" }}>Démarrer</button>}
+                  {j.status === "en_cours" && <button onClick={() => upd(j.id, { status: "termine" })} className="px-3 py-1.5 rounded-md text-xs" style={{ background: "#F0ECE3", color: "#6B6558", border: "1px solid #DCD5C6" }}>Marquer terminé</button>}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
@@ -4482,6 +4616,57 @@ function AppInner() {
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
   }, [subBlocked]);
+  // ---------- Paiement en ligne de l'abonnement (SasPay) ----------
+  // Le bouton n'apparaît que si le serveur est configuré (variables SasPay dans Vercel).
+  const [payInfo, setPayInfo] = useState(null); // { enabled, price, months }
+  const [payBusy, setPayBusy] = useState(false);
+  const [payMsg, setPayMsg] = useState("");
+  const payCall = async (payload) => {
+    const r = await fetch("/api/saspay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "Erreur");
+    return j;
+  };
+  useEffect(() => {
+    if (!subBlocked || payInfo) return;
+    payCall({ action: "info" }).then(setPayInfo).catch(() => setPayInfo({ enabled: false }));
+  }, [subBlocked, payInfo]);
+  const startPayment = async () => {
+    setPayBusy(true); setPayMsg("");
+    try {
+      const j = await payCall({ action: "create", shopId });
+      try { localStorage.setItem("wuri-payref", j.ref); } catch (e) {}
+      window.location.href = j.url;
+    } catch (e) {
+      setPayMsg(e.message || "Paiement impossible pour le moment.");
+      setPayBusy(false);
+    }
+  };
+  // Au retour de la page de paiement (ou si l'onglet a été fermé avant la fin), on vérifie le paiement chez SasPay.
+  useEffect(() => {
+    let ref = "";
+    try { ref = new URLSearchParams(window.location.search).get("pay") || localStorage.getItem("wuri-payref") || ""; } catch (e) {}
+    if (!/^[a-f0-9]{32}$/.test(ref)) return;
+    let stop = false, tries = 0;
+    const check = async () => {
+      if (stop) return;
+      tries += 1;
+      try {
+        const j = await payCall({ action: "status", ref });
+        if (j.paid) {
+          try { localStorage.removeItem("wuri-payref"); } catch (e) {}
+          try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+          setPayMsg("✓ Paiement reçu, abonnement prolongé.");
+          setSubTick((n) => n + 1);
+          return;
+        }
+      } catch (e) {}
+      if (tries < 40) setTimeout(check, 4000);
+      else { try { localStorage.removeItem("wuri-payref"); } catch (e) {} }
+    };
+    check();
+    return () => { stop = true; };
+  }, []);
   const [newShopCode, setNewShopCode] = useState(null); // affiché juste après une création de commerce
 
   useEffect(() => {
@@ -4524,6 +4709,7 @@ function AppInner() {
   const [sellers, setSellers, sellersLoaded] = useShared(k("sellers"), [], pendingRef, bumpSync);
   const [cashiers, setCashiers, cashiersLoaded] = useShared(k("cashiers"), [], pendingRef, bumpSync);
   const [clients, setClients, clientsLoaded] = useShared(k("clients"), [], pendingRef, bumpSync);
+  const [jobs, setJobs] = useShared(k("jobs"), [], pendingRef, bumpSync);
   const [hours, setHours, hoursLoaded] = useShared(k("hours"), { open: "08:00", close: "18:00" }, pendingRef, bumpSync);
   const [shopLocation, setShopLocation] = useShared(k("shopLocation"), null, pendingRef, bumpSync);
   const [shopLogoUrl, setShopLogoUrl] = useShared(k("shopLogo"), "", pendingRef, bumpSync);
@@ -4701,7 +4887,7 @@ function AppInner() {
   const backupKey = shopId ? `backup:${shopId}` : null;
   const makeBackup = async () => {
     if (!backupKey) return false;
-    const data = { products, sales, clients, sellers, cashiers, shifts, expenses, purchases, closures, hours, salesGoal, categories: customCategories, depots: customDepots };
+    const data = { products, sales, clients, jobs, sellers, cashiers, shifts, expenses, purchases, closures, hours, salesGoal, categories: customCategories, depots: customDepots };
     const payload = { date: Date.now(), version: APP_VERSION, data };
     try {
       await storage.set(backupKey, JSON.stringify(payload), true);
@@ -4716,7 +4902,7 @@ function AppInner() {
       if (!res) return false;
       const { data } = JSON.parse(res.value);
       if (!data) return false;
-      setProducts(data.products || []); setSales(data.sales || []); setClients(data.clients || []);
+      setProducts(data.products || []); setSales(data.sales || []); setClients(data.clients || []); setJobs(data.jobs || []);
       setSellers(data.sellers || []); setCashiers(data.cashiers || []); setShifts(data.shifts || []);
       setExpenses(data.expenses || []); setPurchases(data.purchases || []); setClosures(data.closures || []);
       if (data.hours) setHours(data.hours);
@@ -5313,6 +5499,17 @@ function AppInner() {
           >
             Contacter Moïse Tech Énergie
           </a>
+          {payInfo?.enabled && (
+            <button
+              onClick={startPayment}
+              disabled={payBusy}
+              className="block w-full py-3 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ background: "#C08A3E", color: "#FFFFFF" }}
+            >
+              {payBusy ? "Ouverture du paiement…" : `Payer ${fmt(payInfo.price)} FCFA (${payInfo.months} mois) en ligne`}
+            </button>
+          )}
+          {payMsg && <p className="text-xs" style={{ color: payMsg.startsWith("✓") ? "#16A34A" : "#DC4C3C" }}>{payMsg}</p>}
           <button
             onClick={() => setSubTick((n) => n + 1)}
             className="block w-full py-3 rounded-lg text-sm font-medium"
@@ -5357,6 +5554,7 @@ function AppInner() {
     { id: "stock", label: "Stock", icon: Package },
     { id: "vente", label: "Vente", icon: ShoppingCart },
     { id: "clients", label: "Clients", icon: Users },
+    ...(businessType && BUSINESS_TYPES[businessType]?.isService ? [{ id: "chantiers", label: "Chantiers", icon: ClipboardList }] : []),
     { id: "inventaire", label: "Inventaire", icon: ClipboardList },
     { id: "historique", label: "Historique", icon: History },
     { id: "agenda", label: "Agenda", icon: Clock },
@@ -5494,6 +5692,7 @@ function AppInner() {
         {tab === "stock" && <StockTab alertPhones={alertPhones} canEdit={canStock} depots={depots} categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
         {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} />}
         {tab === "clients" && <ClientsTab shopName={shopName} clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
+        {tab === "chantiers" && <ChantiersTab jobs={jobs} setJobs={setJobs} isAdmin={isAdmin} shopName={shopName} />}
         {tab === "inventaire" && <InventaireTab products={products} isAdmin={canStock} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
         {tab === "historique" && <HistoriqueTab sales={sales} />}
         {tab === "agenda" && <AgendaTab shifts={shifts} />}
