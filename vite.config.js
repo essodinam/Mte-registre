@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icons/apple-touch-icon.png"],
       manifest: {
-        name: "WURI CENTER",
-        short_name: "WURI CENTER",
+        name: "KABATEC Consulting",
+        short_name: "KABATEC",
         description: "Gestion de stock, ventes, paie et prise de service — Moïse Tech Énergie",
         start_url: "/",
         display: "standalone",
