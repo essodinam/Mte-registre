@@ -6,6 +6,8 @@
 //   SASPAY_WEBHOOK_SECRET    secret de signature du webhook (celui saisi dans SasPay)
 //   SASPAY_CONTACT_EMAIL     e-mail exigé par SasPay pour chaque paiement (le tien)
 //   SUBSCRIPTION_PRICE_XOF   prix d'un mois d'abonnement, ex. 5000
+//   SASPAY_SALE_SHOPS        codes des commerces autorisés à encaisser les ventes en ligne sur TON compte SasPay,
+//                            séparés par des virgules (ex. BARAKAT-1,KABATEC-2). Vide = désactivé.
 //   APP_URL                  (facultatif) https://mte-registre.vercel.app
 //   SUPABASE_SERVICE_KEY, VITE_SUPABASE_URL ou SUPABASE_URL (déjà en place)
 
@@ -81,6 +83,7 @@ export async function settle(c, pending) {
   const claim = await must(await rest(`saspay_pending?ref=eq.${encodeURIComponent(pending.ref)}&applied_at=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ applied_at: new Date().toISOString() }) }));
   const claimed = await claim.json();
   if (!claimed.length) return { paid: true };
+  if (pending.kind === "sale") return { paid: true }; // vente en boutique : pas d'abonnement à prolonger
   try {
     const until = await extendSubscription(c, pending.shop_id, pending.months);
     return { paid: true, until };
@@ -90,3 +93,5 @@ export async function settle(c, pending) {
     throw e;
   }
 }
+
+export const saleShops = () => (process.env.SASPAY_SALE_SHOPS || "").split(",").map((x) => x.trim()).filter(Boolean);

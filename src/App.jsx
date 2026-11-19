@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.20";
+const APP_VERSION = "3.9.21";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -2171,7 +2171,7 @@ function BarcodeScannerModal({ onDetect, onClose }) {
   );
 }
 
-function VenteTab({ categories, products, cart, setCart, onValidate, clients, onAddClient, fedapayKey, shopName }) {
+function VenteTab({ categories, products, cart, setCart, onValidate, clients, onAddClient, fedapayKey, shopName, shopId }) {
   const [clientId, setClientId] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
@@ -2180,6 +2180,37 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
   const [payingOnline, setPayingOnline] = useState(false);
   const [onlineError, setOnlineError] = useState("");
   const [creditError, setCreditError] = useState("");
+  const [saleEnabled, setSaleEnabled] = useState(false); // paiement par lien SasPay actif pour ce commerce
+  const [payLink, setPayLink] = useState(null); // { url, ref, amount }
+  const [linkMsg, setLinkMsg] = useState("");
+  const finishRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!shopId) return undefined;
+    fetch("/api/saspay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "saleInfo", shopId }) })
+      .then((r) => r.json()).then((d) => { if (!cancelled) setSaleEnabled(!!(d && d.enabled)); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [shopId]);
+
+  // Vérifie toutes les 4 s si le client a payé (le serveur interroge SasPay lui-même).
+  useEffect(() => {
+    if (!payLink) return undefined;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const r = await fetch("/api/saspay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "status", ref: payLink.ref }) });
+        const d = await r.json();
+        if (!stopped && d && d.paid) {
+          stopped = true;
+          setPayLink(null);
+          if (finishRef.current) finishRef.current("en_ligne");
+        }
+      } catch (e) { /* on réessaie au prochain passage */ }
+    };
+    const t = setInterval(check, 4000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [payLink]);
 
   const stepOf = (i) => (i.decimal ? 0.5 : 1);
   const add = (p) => setCart((c) => {
@@ -2226,8 +2257,25 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
     setPaymentMethod("especes");
   };
 
+  finishRef.current = finishSale;
+
+  const startLinkPayment = async () => {
+    setPayingOnline(true);
+    try {
+      const r = await fetch("/api/saspay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "createSale", shopId, amount: total, label: `Vente — ${shopName || "KABATEC Consulting"}` }) });
+      const d = await r.json();
+      if (!r.ok || !d.url) throw new Error(d.error || "erreur");
+      setLinkMsg("");
+      setPayLink({ url: d.url, ref: d.ref, amount: total });
+    } catch (e) {
+      setOnlineError("Impossible de créer le lien de paiement. Vérifie la connexion internet et réessaie. Aucune vente n'a été enregistrée.");
+    }
+    setPayingOnline(false);
+  };
+
   const startOnlinePayment = () => {
     setOnlineError("");
+    if (saleEnabled) { startLinkPayment(); return; }
     if (!fedapayKey) {
       setOnlineError("Le paiement en ligne n'est pas encore activé pour ce commerce. Le gérant doit d'abord renseigner sa clé FedaPay dans Réglages → Paiement en ligne.");
       return;
@@ -2427,7 +2475,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
                   );
                 })}
               </div>
-              {paymentMethod === "en_ligne" && !fedapayKey && (
+              {paymentMethod === "en_ligne" && !fedapayKey && !saleEnabled && (
                 <p className="text-[10px] mt-1.5" style={{ color: "#DC4C3C" }}>Paiement en ligne non configuré pour ce commerce.</p>
               )}
               {paymentMethod === "credit" && (
@@ -2453,6 +2501,23 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
             >
               {payingOnline ? (<><Loader2 size={16} className="animate-spin" /> Paiement en cours…</>) : paymentMethod === "en_ligne" ? (<><Globe size={16} /> Payer en ligne</>) : (<><Check size={16} /> Valider la vente</>)}
             </button>
+          </div>
+        </div>
+      )}
+
+      {payLink && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "#000000AA" }}>
+          <div className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: "#FFFFFF" }}>
+            <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">Paiement en ligne — {fmt(payLink.amount)} FCFA</h3>
+            <p className="text-xs" style={{ color: "#6B6558" }}>Envoie ce lien au client : il paie avec Moov Money ou Togocel Money. Des frais de service (≈ 4,1 %) sont ajoutés pour lui. La vente s'enregistre toute seule dès que le paiement est confirmé.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <a href={`https://wa.me/${(selectedClient && selectedClient.phone ? String(selectedClient.phone).replace(/\D/g, "") : "")}?text=${encodeURIComponent(`Bonjour, voici le lien pour payer ${fmt(payLink.amount)} FCFA : ${payLink.url}`)}`} target="_blank" rel="noreferrer" className="py-2 rounded-lg text-xs text-center" style={{ background: "#16A34A", color: "#FFFFFF" }}>Envoyer par WhatsApp</a>
+              <button onClick={() => { try { navigator.clipboard.writeText(payLink.url); setLinkMsg("Lien copié."); } catch (e) { setLinkMsg(payLink.url); } }} className="py-2 rounded-lg text-xs" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>Copier le lien</button>
+            </div>
+            <a href={payLink.url} target="_blank" rel="noreferrer" className="block py-2 rounded-lg text-xs text-center" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>Ouvrir le paiement ici (le client paie sur ce téléphone)</a>
+            {linkMsg && <p className="text-[10px] break-all" style={{ color: "#6B6558" }}>{linkMsg}</p>}
+            <p className="text-xs flex items-center gap-2" style={{ color: "#C08A3E" }}><Loader2 size={14} className="animate-spin" /> En attente du paiement…</p>
+            <button onClick={() => { setPayLink(null); setOnlineError("Paiement abandonné. Si le client a quand même payé, enregistre la vente à la main (Mobile Money)."); }} className="w-full py-2 rounded-lg text-xs" style={{ background: "#FFFFFF", border: "1px solid #DC4C3C", color: "#DC4C3C" }}>Annuler</button>
           </div>
         </div>
       )}
@@ -5690,7 +5755,7 @@ function AppInner() {
 
       <main className="max-w-lg md:max-w-3xl mx-auto px-4 pb-4">
         {tab === "stock" && <StockTab alertPhones={alertPhones} canEdit={canStock} depots={depots} categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
-        {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} />}
+        {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} shopId={shopId} />}
         {tab === "clients" && <ClientsTab shopName={shopName} clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
         {tab === "chantiers" && <ChantiersTab jobs={jobs} setJobs={setJobs} isAdmin={isAdmin} shopName={shopName} />}
         {tab === "inventaire" && <InventaireTab products={products} isAdmin={canStock} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
