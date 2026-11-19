@@ -3,7 +3,7 @@
  * Application de gestion de stock et de ventes.
  */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Plus, Minus, Trash2, Package, ShoppingCart, History, Settings, AlertTriangle, X, Check, Lock, LogOut, ClipboardList, WifiOff, RefreshCw, UserPlus, User, Clock, PenTool, Receipt, Wrench, Wine, ShoppingBag, Hammer, Users, Phone, Banknote, Smartphone, CreditCard, Globe, Loader2, ScanLine, Star, CalendarClock, Repeat, Sparkles, Send, ArrowLeft, BarChart3 } from "lucide-react";
+import { Plus, Minus, Trash2, Package, ShoppingCart, History, Settings, AlertTriangle, X, Check, Lock, LogOut, ClipboardList, WifiOff, RefreshCw, UserPlus, User, Clock, PenTool, Camera, Receipt, Wrench, Wine, ShoppingBag, Hammer, Users, Phone, Banknote, Smartphone, CreditCard, Globe, Loader2, ScanLine, Star, CalendarClock, Repeat, Sparkles, Send, ArrowLeft, BarChart3 } from "lucide-react";
 import { storage } from "./storage.js";
 
 /* ---------- Design tokens ----------
@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.21";
+const APP_VERSION = "3.9.22";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -558,6 +558,124 @@ function SignaturePad({ name, onSign, onCancel, title = "Signature de prise de s
             {confirming ? (<><Loader2 size={15} className="animate-spin" /> Vérification…</>) : confirmLabel}
           </button>
         </div>
+        <button onClick={onCancel} className="w-full text-xs" style={{ color: "#6B6558" }}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Selfie de prise / fin de service ----------
+   Remplace la signature : une photo de face, enregistrée avec l'heure et la position,
+   que le gérant voit dans l'Agenda. Si la caméra est refusée, on propose la signature
+   à la main (le gérant voit alors « sans selfie »). onSign peut renvoyer un texte
+   d'erreur (ex. « hors zone ») qui s'affiche ici sans fermer la fenêtre. */
+function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service", confirmLabel = "Valider et commencer" }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [camError, setCamError] = useState(false);
+  const [useSignature, setUseSignature] = useState(false);
+  const [photo, setPhoto] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState("");
+
+  const stopCamera = () => {
+    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+  const startCamera = async () => {
+    setReady(false);
+    setCamError(false);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no camera api");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 } }, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setReady(true);
+    } catch (e) {
+      setCamError(true);
+    }
+  };
+  useEffect(() => {
+    startCamera();
+    return stopCamera;
+  }, []);
+
+  const snap = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    const W = 240, H = 320;
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const ctx = c.getContext("2d");
+    // cadrage portrait 3:4 au centre de l'image, en miroir comme un vrai selfie
+    const ratio = W / H;
+    let sw = v.videoHeight * ratio, sh = v.videoHeight;
+    if (sw > v.videoWidth) { sw = v.videoWidth; sh = sw / ratio; }
+    const sx = (v.videoWidth - sw) / 2, sy = (v.videoHeight - sh) / 2;
+    ctx.translate(W, 0); ctx.scale(-1, 1);
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, W, H);
+    setPhoto(c.toDataURL("image/jpeg", 0.55));
+    stopCamera();
+  };
+  const retake = () => { setPhoto(null); setError(""); startCamera(); };
+  const confirm = async () => {
+    if (!photo || confirming) return;
+    setConfirming(true);
+    setError("");
+    try {
+      const msg = await onSign(photo, "selfie");
+      if (typeof msg === "string" && msg) setError(msg);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  if (useSignature) {
+    return <SignaturePad name={name} title={title.replace("Selfie", "Signature")} confirmLabel={confirmLabel} onSign={async (sig) => { const m = await onSign(sig, "signature"); if (typeof m === "string" && m) window.alert(m); }} onCancel={onCancel} />;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#00000099" }}>
+      <div className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+        <div className="text-center">
+          <Camera size={20} style={{ color: "#C08A3E" }} className="mx-auto" />
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg mt-1">{title}</h3>
+          <p className="text-xs mt-1" style={{ color: "#6B6558" }}>{name} — {new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
+        </div>
+        {camError ? (
+          <div className="text-xs rounded-lg p-3 space-y-2" style={{ background: "#DC4C3C14", color: "#B23A2C" }}>
+            <p>La caméra n'est pas accessible. Autorise la caméra pour ce site dans ton navigateur, puis réessaie.</p>
+            <button onClick={startCamera} className="px-3 py-1.5 rounded-md text-xs" style={{ background: "#FFFFFF", border: "1px solid #DC4C3C", color: "#DC4C3C" }}>Réessayer</button>
+          </div>
+        ) : (
+          <div className="mx-auto rounded-lg overflow-hidden" style={{ width: 225, height: 300, background: "#1B1F1C" }}>
+            {photo ? (
+              <img src={photo} alt="Ton selfie" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              <video ref={videoRef} playsInline muted autoPlay style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }} />
+            )}
+          </div>
+        )}
+        {error && <p className="text-xs text-center" style={{ color: "#DC4C3C" }}>{error}</p>}
+        <div className="flex gap-2">
+          {photo ? (
+            <>
+              <button onClick={retake} disabled={confirming} className="px-4 py-2.5 rounded-lg text-sm disabled:opacity-40" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>Reprendre</button>
+              <button onClick={confirm} disabled={confirming} className="flex-1 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: "#C08A3E", color: "#F0ECE3" }}>
+                {confirming ? (<><Loader2 size={15} className="animate-spin" /> Vérification…</>) : confirmLabel}
+              </button>
+            </>
+          ) : (
+            <button onClick={snap} disabled={!ready} className="flex-1 py-2.5 rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#C08A3E", color: "#F0ECE3" }}>Prendre le selfie</button>
+          )}
+        </div>
+        {camError && (
+          <button onClick={() => { stopCamera(); setUseSignature(true); }} className="w-full text-xs underline" style={{ color: "#6B6558" }}>Caméra impossible : signer à la main (sans selfie)</button>
+        )}
         <button onClick={onCancel} className="w-full text-xs" style={{ color: "#6B6558" }}>Annuler</button>
       </div>
     </div>
@@ -2990,14 +3108,30 @@ function AgendaTab({ shifts }) {
                       </div>
                     )}
                   </div>
-                  {s.signature && (
-                    <img
-                      src={s.signature}
-                      alt={`Signature de ${s.name}`}
-                      className="h-8 w-16 object-contain rounded shrink-0"
-                      style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}
-                    />
-                  )}
+                  <div className="flex gap-1 shrink-0 items-start">
+                    {s.signature && (
+                      <div className="text-center">
+                        <img
+                          src={s.signature}
+                          alt={s.proofType === "signature" || !s.proofType ? `Signature de ${s.name}` : `Selfie de ${s.name}`}
+                          className={s.proofType === "selfie" ? "h-16 w-12 object-cover rounded" : "h-8 w-16 object-contain rounded"}
+                          style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}
+                        />
+                        <div className="text-[8px]" style={{ color: "#6B6558" }}>début{s.proofType === "signature" ? " (sans selfie)" : ""}</div>
+                      </div>
+                    )}
+                    {s.endSignature && (
+                      <div className="text-center">
+                        <img
+                          src={s.endSignature}
+                          alt={s.endProofType === "selfie" ? `Selfie de fin de ${s.name}` : `Signature de fin de ${s.name}`}
+                          className={s.endProofType === "selfie" ? "h-16 w-12 object-cover rounded" : "h-8 w-16 object-contain rounded"}
+                          style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}
+                        />
+                        <div className="text-[8px]" style={{ color: "#6B6558" }}>fin</div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </Row>
             ))}
@@ -3784,7 +3918,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
           </div>
           <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
             <p className="text-xs" style={{ color: "#6B6558" }}>
-              Enregistre la position GPS de ton commerce depuis ici, sur place. À chaque prise de service, l'application compare la position de l'appareil à celle-ci (tolérance {SHOP_RADIUS_METERS} m) pour vérifier que le vendeur ou le caissier est bien sur place. Ça n'empêche personne de se connecter — ça ajoute juste un repère "sur place" ou "hors zone" visible dans l'Agenda.
+              Enregistre la position GPS de ton commerce depuis ici, sur place. À chaque prise de service, l'application compare la position de l'appareil à celle-ci (tolérance {SHOP_RADIUS_METERS} m) pour vérifier que le vendeur ou le caissier est bien sur place. Hors zone (ou sans GPS), un vendeur ou un caissier ne peut PAS prendre son service ; le gérant peut se connecter de n'importe où. Tant que cette position n'est pas enregistrée, personne n'est bloqué. Chaque prise et fin de service enregistre aussi un selfie, visible dans l'Agenda.
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               <button
@@ -5169,15 +5303,15 @@ function AppInner() {
 
   const lowStockCount = useMemo(() => products.filter((p) => !p.isService && p.stock <= p.threshold).length, [products]);
 
-  const confirmSignature = async (signature) => {
-    // Vérifie que la prise de service se fait bien sur place : on compare la
-    // position GPS de l'appareil à celle du commerce (enregistrée une fois par
-    // le gérant). Si la position est refusée/indisponible ou que l'emplacement
-    // du commerce n'est pas encore défini, on laisse quand même signer mais on
-    // le marque comme non vérifié pour que le gérant puisse le voir dans l'agenda.
+  const confirmSignature = async (signature, proofType = "selfie") => {
+    // Prise de service : selfie + position GPS. Pour un vendeur ou un caissier, la prise
+    // de service est REFUSÉE hors du commerce (ou si la position est indisponible), dès que
+    // le gérant a enregistré l'emplacement du commerce. Le gérant n'est pas bloqué : il peut
+    // se connecter de n'importe où. Sans emplacement enregistré, on laisse passer (« non vérifiée »).
     let locationFlag = "non_verifiee";
     let distance = null;
     let location = null;
+    let gpsFailed = false;
     try {
       location = await getCurrentPosition();
       if (shopLocation) {
@@ -5186,8 +5320,16 @@ function AppInner() {
       }
     } catch (e) {
       locationFlag = "non_verifiee";
+      gpsFailed = true;
     }
-    setShifts((prev) => [...prev, { id: uid(), personId: pendingUser.id || null, name: pendingUser.name, role: pendingUser.role, time: Date.now(), signature, location, distance, locationFlag }]);
+    if (pendingUser.role !== "gerant" && shopLocation) {
+      if (gpsFailed) return "Position introuvable. Active la localisation (GPS) du téléphone pour ce site, puis réessaie.";
+      if (locationFlag === "hors_zone") {
+        const d = distance >= 1000 ? `${(distance / 1000).toFixed(1)} km` : `${distance} m`;
+        return `Tu es à ${d} du commerce (maximum ${SHOP_RADIUS_METERS} m). La prise de service n'est possible que sur place.`;
+      }
+    }
+    setShifts((prev) => [...prev, { id: uid(), personId: pendingUser.id || null, name: pendingUser.name, role: pendingUser.role, time: Date.now(), signature, proofType, location, distance, locationFlag }]);
     setCurrentUser(pendingUser);
     setLoginDate(new Date().toDateString());
     // Propose l'empreinte digitale si l'appareil la supporte et qu'elle n'est pas
@@ -5202,7 +5344,7 @@ function AppInner() {
   // clôturer le shift en cours. Permet de calculer les heures travaillées (utilisées
   // dans l'onglet Paie) et évite qu'un shift reste ouvert indéfiniment.
   const [endingService, setEndingService] = useState(false);
-  const confirmEndSignature = async (signature) => {
+  const confirmEndSignature = async (signature, proofType = "selfie") => {
     let locationFlag = "non_verifiee";
     let distance = null;
     let location = null;
@@ -5223,7 +5365,7 @@ function AppInner() {
       }
       if (idx === -1) return prev;
       const copy = [...prev];
-      copy[idx] = { ...copy[idx], endTime: Date.now(), endSignature: signature, endLocation: location, endDistance: distance, endLocationFlag: locationFlag };
+      copy[idx] = { ...copy[idx], endTime: Date.now(), endSignature: signature, endProofType: proofType, endLocation: location, endDistance: distance, endLocationFlag: locationFlag };
       return copy;
     });
     setEndingService(false);
@@ -5609,7 +5751,7 @@ function AppInner() {
           />
         )}
         {pendingUser && (
-          <SignaturePad name={pendingUser.name} onSign={confirmSignature} onCancel={() => setPendingUser(null)} />
+          <SelfiePad name={pendingUser.name} onSign={confirmSignature} onCancel={() => setPendingUser(null)} />
         )}
       </>
     );
@@ -5876,10 +6018,10 @@ function AppInner() {
       )}
 
       {endingService && currentUser && (
-        <SignaturePad
+        <SelfiePad
           name={currentUser.name}
-          title="Signature de fin de service"
-          confirmLabel="Signer et terminer"
+          title="Selfie de fin de service"
+          confirmLabel="Valider et terminer"
           onSign={confirmEndSignature}
           onCancel={() => setEndingService(false)}
         />
