@@ -111,7 +111,9 @@ export async function activateSignup(c, pending) {
   const until = new Date();
   until.setMonth(until.getMonth() + (pending.months || 1));
   if (!list.some((s) => s.code === pending.shop_id)) {
-    list.push({ code: pending.shop_id, businessType: null, createdAt: new Date().toISOString(), subscriptionUntil: until.toISOString(), source: "inscription" });
+    const bt = /^bt:(\w+)\|/.exec(pending.label || "")?.[1] || null;
+    if (bt) await must(await rest("kv_store", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: `businessType:${pending.shop_id}`, value: bt, updated_at: new Date().toISOString() }) }));
+    list.push({ code: pending.shop_id, businessType: bt, createdAt: new Date().toISOString(), subscriptionUntil: until.toISOString(), source: "inscription" });
     await must(await rest("kv_store", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: REGISTRY_KEY, value: list, updated_at: new Date().toISOString() }) }));
   }
   const pr = await must(await rest(`user_profiles?shop_id=eq.${encodeURIComponent(pending.shop_id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "paye", paid_at: new Date().toISOString() }) }));

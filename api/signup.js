@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { cfg, db, saspay, settle, REGISTRY_KEY, telegram } from "./_saspay.js";
 
 const OPTIONS = [1, 3, 6, 12];
+const TYPES = ["quincaillerie", "bar", "boutique", "menuiserie"];
 const hits = new Map();
 function tooMany(key, max) {
   const now = Date.now();
@@ -48,6 +49,7 @@ export default async function handler(req, res) {
       const email = clean(p.email, 80).toLowerCase();
       const city = clean(p.city, 60);
       const business = clean(p.businessName, 60);
+      const btype = TYPES.includes(p.businessType) ? p.businessType : null;
       if (first.length < 2 || last.length < 2) return res.status(400).json({ error: "Indique ton prénom et ton nom." });
       if (!(age >= 18 && age <= 120)) return res.status(400).json({ error: "L'inscription est réservée aux personnes de 18 ans et plus." });
       if (!/^\+?\d{8,15}$/.test(phone)) return res.status(400).json({ error: "Numéro de téléphone invalide." });
@@ -80,7 +82,7 @@ export default async function handler(req, res) {
       });
       if (!session.ok || !session.data?.checkout_url || !session.data?.id) return res.status(502).json({ error: "Le paiement n'a pas pu être créé. Réessaie plus tard." });
       await must(await rest("user_profiles", { method: "POST", body: JSON.stringify({ shop_id: code, ref, first_name: first, last_name: last, age, phone, email: email || null, city: city || null, business_name: business, months }) }));
-      await must(await rest("saspay_pending", { method: "POST", body: JSON.stringify({ ref, session_id: String(session.data.id), shop_id: code, months, amount, currency: "XOF", kind: "signup", label: `Inscription ${business}`.slice(0, 120) }) }));
+      await must(await rest("saspay_pending", { method: "POST", body: JSON.stringify({ ref, session_id: String(session.data.id), shop_id: code, months, amount, currency: "XOF", kind: "signup", label: (btype ? `bt:${btype}|` : "") + `Inscription ${business}`.slice(0, 100) }) }));
       return res.status(200).json({ url: session.data.checkout_url, ref });
     }
 

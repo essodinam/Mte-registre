@@ -697,12 +697,12 @@ const CATEGORY_SHOWCASE = [
   { key: "menuiserie", label: "Menuiserie", image: IMG_MENUISERIE },
 ];
 
-function CategoryShowcase() {
+function CategoryShowcase({ onPick }) {
   // Photos détourées (fond retiré), présentées dans des cercles.
   return (
     <div className="grid grid-cols-4 gap-x-2 mb-1 justify-items-center">
       {CATEGORY_SHOWCASE.map(({ key, label, image }) => (
-        <div key={key} className="w-full max-w-[92px] flex flex-col items-center">
+        <button type="button" key={key} onClick={() => onPick && onPick(key)} aria-label={`Créer mon commerce : ${label}`} className="w-full max-w-[92px] flex flex-col items-center active:scale-95 transition-transform">
           <div
             className="w-full aspect-square rounded-full overflow-hidden flex items-center justify-center"
             style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", boxShadow: "0 2px 8px #1B1F1C14" }}
@@ -712,7 +712,7 @@ function CategoryShowcase() {
           <span className="mt-1.5 text-[10px] text-center leading-tight" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>
             {label}
           </span>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -990,7 +990,7 @@ function DevPanel({ onOpenShop, onClose }) {
 }
 
 /* ---------- Inscription en ligne : profil du commerçant + paiement de l'abonnement (SasPay) ---------- */
-function SignupForm({ onBack }) {
+function SignupForm({ onBack, businessType }) {
   const [f, setF] = useState({ firstName: "", lastName: "", age: "", phone: "", email: "", city: "", businessName: "", months: 1, consent: false, website: "" });
   const [plans, setPlans] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1014,7 +1014,7 @@ function SignupForm({ onBack }) {
     if (!f.consent) return setErr("Coche la case pour accepter l'enregistrement de tes informations.");
     setBusy(true);
     try {
-      const j = await call({ action: "start", months: f.months, consent: true, website: f.website, profile: { firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
+      const j = await call({ action: "start", months: f.months, consent: true, website: f.website, profile: { businessType, firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
       try { localStorage.setItem("kabatec-signupref", j.ref); } catch (e) {}
       window.location.href = j.url;
     } catch (e) { setErr(e.message || "Inscription impossible pour le moment."); setBusy(false); }
@@ -1027,7 +1027,7 @@ function SignupForm({ onBack }) {
       <div className="w-full max-w-sm space-y-3">
         <div className="text-center">
           <Logo size={48} />
-          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl mt-1">Créer mon commerce</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl mt-1">Créer mon commerce{businessType && BUSINESS_TYPES[businessType] ? ` — ${BUSINESS_TYPES[businessType].label}` : ""}</h1>
           <p className="text-xs mt-1" style={{ color: "#6B6558" }}>Remplis ton profil, paie ton abonnement : ton commerce est créé aussitôt.</p>
         </div>
         {plans && !plans.enabled && <p className="text-sm text-center p-3 rounded-lg" style={{ background: "#DC4C3C1A", color: "#DC4C3C" }}>L'inscription en ligne n'est pas disponible pour le moment.</p>}
@@ -1072,6 +1072,7 @@ function SignupForm({ onBack }) {
 /* ---------- Écran d'accueil ---------- */
 function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget, onSignedUp }) {
   const [mode, setMode] = useState(null); // null | 'join' | 'signup'
+  const [pickedType, setPickedType] = useState(null);
   const [code, setCode] = useState("");
   const [ownerGate, setOwnerGate] = useState(false);
   const [ownerError, setOwnerError] = useState("");
@@ -1100,7 +1101,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
     } catch (e) { setOwnerError(e?.message || "Empreinte refusée."); }
   };
 
-  if (mode === "signup") return <SignupForm onBack={() => setMode(null)} />;
+  if (mode === "signup") return <SignupForm businessType={pickedType} onBack={() => setMode(null)} />;
 
   if (mode === "join") {
     return (
@@ -1135,11 +1136,11 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
       <div className="w-full max-w-sm space-y-5">
-        <CategoryShowcase />
         <div className="flex flex-col items-center text-center">
-          <BrandLogo width={300} />
-          <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Bienvenue</p>
+          <BrandLogo width={320} />
+          <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Bienvenue — touche ton activité pour créer ton commerce</p>
         </div>
+        <CategoryShowcase onPick={(t) => { setPickedType(t); setMode("signup"); }} />
         {knownShops && knownShops.length > 0 && (
           <div>
             <p className="text-xs uppercase tracking-wide mb-1.5 px-1" style={{ color: "#6B6558" }}>Mes commerces sur cet appareil</p>
@@ -1173,13 +1174,6 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
             <span>
               <span style={{ fontFamily: "'Carlito', sans-serif" }} className="block">Rejoindre un commerce</span>
               <span className="text-xs block mt-0.5" style={{ color: "#6B6558" }}>J'ai déjà un code</span>
-            </span>
-          </button>
-          <button onClick={() => setMode("signup")} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
-            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#C08A3E", color: "#1B1F1C" }}><Sparkles size={16} /></span>
-            <span>
-              <span style={{ fontFamily: "'Carlito', sans-serif" }} className="block">Créer mon commerce</span>
-              <span className="text-xs block mt-0.5" style={{ color: "#DCD5C6" }}>Je m'inscris en ligne et je paie mon abonnement</span>
             </span>
           </button>
         </div>
