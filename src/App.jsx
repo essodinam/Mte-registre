@@ -287,22 +287,7 @@ function Logo({ size = 40, letter = WELCOME_LETTER }) {
 
 /* ---------- Logo horizontal KABATEC Consulting (pictogramme + nom + signature) ---------- */
 function BrandLogo({ width = 320 }) {
-  const font = "Montserrat, 'Arial Black', 'Helvetica Neue', Arial, sans-serif";
-  return (
-    <svg width={width} viewBox="0 0 520 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KABATEC Consulting">
-      {/* pictogramme : maison + lettre K */}
-      <path d="M14 70 L68 22 L122 70 L122 112 L14 112 Z" fill="none" stroke="#C08A3E" strokeWidth="9" strokeLinejoin="round" />
-      <rect x="82" y="12" width="14" height="30" fill="#1B1F1C" />
-      <path d="M44 58 V98 M44 80 L76 58 M54 74 L78 98" stroke="#1B1F1C" strokeWidth="10" strokeLinecap="round" fill="none" />
-      <path d="M6 124 Q60 106 134 112" stroke="#C08A3E" strokeWidth="5" fill="none" strokeLinecap="round" />
-      {/* nom */}
-      <rect x="150" y="14" width="360" height="5" rx="2.5" fill="#C08A3E" />
-      <text x="146" y="86" fontFamily={font} fontWeight="900" fontSize="74" fill="#1B1F1C" textLength="366" lengthAdjust="spacingAndGlyphs">KABATEC</text>
-      <text x="150" y="116" fontFamily={font} fontWeight="700" fontSize="14" fill="#1B1F1C" textLength="360" lengthAdjust="spacingAndGlyphs">
-        CONSULTING <tspan fill="#C08A3E">●</tspan> QUINCAILLERIE <tspan fill="#C08A3E">●</tspan> SERVICES <tspan fill="#C08A3E">●</tspan> ET PLUS
-      </text>
-    </svg>
-  );
+  return <img src="/kabatec-logo.png" alt="KABATEC Consulting" width={width} style={{ maxWidth: "100%", height: "auto" }} />;
 }
 
 /* ---------- Synchronisation résiliente (file d'attente hors-ligne) ---------- */
