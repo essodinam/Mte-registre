@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.23";
+const APP_VERSION = "3.9.24";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -254,7 +254,7 @@ function receiptPrintCss(format) {
 /* ---------- Mode de paiement ----------
    Deux familles : les moyens "manuels" (juste notés sur la vente, l'argent est
    déjà remis en main propre au vendeur/caissier) et le paiement en ligne réel,
-   via FedaPay, quand le commerce a renseigné sa clé publique dans Réglages.
+   via SasPay (lien de paiement), quand il est activé pour le commerce.
 ------------------------------------------------------------------- */
 const PAYMENT_METHODS = [
   { id: "especes", label: "Espèces", icon: Banknote },
@@ -264,28 +264,6 @@ const PAYMENT_METHODS = [
   { id: "credit", label: "Crédit (à payer plus tard)", icon: Receipt },
 ];
 const paymentLabel = (id) => (PAYMENT_METHODS.find((m) => m.id === id) || PAYMENT_METHODS[0]).label;
-
-/* ---------- Intégration FedaPay (paiement en ligne) ----------
-   Charge le widget Checkout.js de FedaPay une seule fois, puis ouvre la
-   fenêtre de paiement avec la clé publique propre à CE commerce.
-------------------------------------------------------------------- */
-function loadFedaPayScript(callback, onError) {
-  if (typeof window === "undefined") return;
-  if (window.FedaPay) { callback(); return; }
-  const existing = document.getElementById("fedapay-checkout-js");
-  if (existing) {
-    existing.addEventListener("load", callback);
-    existing.addEventListener("error", () => onError && onError());
-    return;
-  }
-  const script = document.createElement("script");
-  script.id = "fedapay-checkout-js";
-  script.src = "https://cdn.fedapay.com/checkout.js?v=1.1.7";
-  script.async = true;
-  script.onload = callback;
-  script.onerror = () => onError && onError();
-  document.body.appendChild(script);
-}
 
 /* ---------- Logo Moïse Tech Énergie ---------- */
 function Logo({ size = 40, letter = WELCOME_LETTER }) {
@@ -2308,7 +2286,7 @@ function BarcodeScannerModal({ onDetect, onClose }) {
   );
 }
 
-function VenteTab({ categories, products, cart, setCart, onValidate, clients, onAddClient, fedapayKey, shopName, shopId }) {
+function VenteTab({ categories, products, cart, setCart, onValidate, clients, onAddClient, shopName, shopId }) {
   const [clientId, setClientId] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
@@ -2413,44 +2391,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
   const startOnlinePayment = () => {
     setOnlineError("");
     if (saleEnabled) { startLinkPayment(); return; }
-    if (!fedapayKey) {
-      setOnlineError("Le paiement en ligne n'est pas encore activé pour ce commerce. Le gérant doit d'abord renseigner sa clé FedaPay dans Réglages → Paiement en ligne.");
-      return;
-    }
-    setPayingOnline(true);
-    loadFedaPayScript(
-      () => {
-        try {
-          window.FedaPay.init({
-            public_key: fedapayKey,
-            transaction: {
-              amount: total,
-              description: `Vente — ${shopName || "KABATEC Consulting"}`,
-            },
-            customer: selectedClient ? {
-              firstname: selectedClient.name,
-              phone_number: { number: selectedClient.phone || "", country: "tg" },
-            } : undefined,
-            onComplete: (resp) => {
-              setPayingOnline(false);
-              const ok = window.FedaPay && resp && resp.reason === window.FedaPay.CHECKOUT_COMPLETED;
-              if (ok) {
-                finishSale("en_ligne");
-              } else {
-                setOnlineError("Le paiement a été annulé ou n'a pas abouti. Aucune vente n'a été enregistrée.");
-              }
-            },
-          }).open();
-        } catch (e) {
-          setPayingOnline(false);
-          setOnlineError("Impossible d'ouvrir le paiement en ligne. Vérifie la connexion internet et la clé FedaPay.");
-        }
-      },
-      () => {
-        setPayingOnline(false);
-        setOnlineError("Impossible de charger le module de paiement en ligne (vérifie la connexion internet).");
-      }
-    );
+    setOnlineError("Le paiement en ligne n'est pas activé pour ce commerce.");
   };
 
   const handleValidate = () => {
@@ -2596,7 +2537,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
             <div className="pt-2 border-t" style={{ borderColor: "#DCD5C6" }}>
               <p className="text-xs mb-1.5" style={{ color: "#6B6558" }}>Moyen de paiement</p>
               <div className="grid grid-cols-3 gap-1.5">
-                {PAYMENT_METHODS.map((m) => {
+                {PAYMENT_METHODS.filter((m) => m.id !== "en_ligne" || saleEnabled).map((m) => {
                   const Icon = m.icon;
                   const active = paymentMethod === m.id;
                   return (
@@ -2612,7 +2553,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
                   );
                 })}
               </div>
-              {paymentMethod === "en_ligne" && !fedapayKey && !saleEnabled && (
+              {paymentMethod === "en_ligne" && !saleEnabled && (
                 <p className="text-[10px] mt-1.5" style={{ color: "#DC4C3C" }}>Paiement en ligne non configuré pour ce commerce.</p>
               )}
               {paymentMethod === "credit" && (
@@ -3782,14 +3723,12 @@ function CategoryManager({ categories, products, onSave, onRename, title = "Cat�
   );
 }
 
-function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, fedapayKey, setFedapayKey, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
   const [newCashierName, setNewCashierName] = useState("");
   const [reportPeriod, setReportPeriod] = useState(null);
-  const [keyDraft, setKeyDraft] = useState(fedapayKey || "");
-  const [keySaved, setKeySaved] = useState(false);
   const padPhones = (arr) => [0, 1, 2].map((i) => ({ name: (arr && arr[i] && arr[i].name) || "", phone: (arr && arr[i] && arr[i].phone) || "" }));
   const [phonesDraft, setPhonesDraft] = useState(padPhones(alertPhones));
   const [phonesSaved, setPhonesSaved] = useState(false);
@@ -3987,42 +3926,6 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
             {!shopLocation && !locationError && (
               <p className="text-[10px]" style={{ color: "#6B6558" }}>Aucune position enregistrée pour l'instant : les prises de service seront marquées "non vérifiées".</p>
             )}
-          </div>
-        </div>
-      )}
-
-      {isAdmin && (
-        <div>
-          <div className="text-xs uppercase tracking-wide mb-2 flex items-center gap-1.5" style={{ color: "#16A34A" }}>
-            <Globe size={13} /> Paiement en ligne
-          </div>
-          <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
-            <p className="text-xs" style={{ color: "#6B6558" }}>
-              Renseigne ici la clé publique FedaPay de ce commerce pour permettre aux clients de payer directement en ligne (Mobile Money, carte...) depuis l'écran de vente.
-            </p>
-            <input
-              value={keyDraft}
-              onChange={(e) => { setKeyDraft(e.target.value); setKeySaved(false); }}
-              placeholder="Clé publique FedaPay (pk_live_... ou pk_sandbox_...)"
-              className="w-full px-3 py-2.5 rounded-md text-sm outline-none"
-              style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}
-            />
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { setFedapayKey(keyDraft.trim()); setKeySaved(true); }}
-                className="px-4 py-2 rounded-md text-sm font-medium"
-                style={{ background: "#C08A3E", color: "#FFFFFF" }}
-              >
-                Enregistrer
-              </button>
-              {keySaved && <span className="text-xs" style={{ color: "#16A34A" }}>✓ Clé enregistrée</span>}
-              {fedapayKey && (
-                <span className="text-xs ml-auto" style={{ color: "#16A34A" }}>Paiement en ligne activé</span>
-              )}
-            </div>
-            <p className="text-[10px]" style={{ color: "#6B6558" }}>
-              Trouve ta clé sur ton compte FedaPay (fedapay.com) → Développeurs → Clés API. Sans cette clé, l'option "Paiement en ligne" reste visible mais ne fonctionne pas.
-            </p>
           </div>
         </div>
       )}
@@ -4965,7 +4868,6 @@ function AppInner() {
   const [shifts, setShifts, shiftsLoaded] = useShared(k("shifts"), [], pendingRef, bumpSync);
   const [attempts, setAttempts] = useShared(k("shiftAttempts"), [], pendingRef, bumpSync);
   const [expenses, setExpenses, expensesLoaded] = useShared(k("expenses"), [], pendingRef, bumpSync);
-  const [fedapayKey, setFedapayKey, fedapayKeyLoaded] = useShared(k("fedapayKey"), "", pendingRef, bumpSync);
   const [gerantEmail, setGerantEmail] = useShared(k("gerantEmail"), "", pendingRef, bumpSync);
   const [alertPhones, setAlertPhones] = useShared(k("alertPhones"), [], pendingRef, bumpSync);
   const [loyaltyRate, setLoyaltyRate] = useShared(k("loyaltyRate"), 0, pendingRef, bumpSync);
@@ -6006,7 +5908,7 @@ function AppInner() {
 
       <main className="max-w-lg md:max-w-3xl mx-auto px-4 pb-4">
         {tab === "stock" && <StockTab alertPhones={alertPhones} canEdit={canStock} depots={depots} categories={categories} products={products} isAdmin={isAdmin} onOpenProduct={setModalProduct} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} />}
-        {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} fedapayKey={fedapayKey} shopName={shopName} shopId={shopId} />}
+        {tab === "vente" && <VenteTab categories={categories} products={products} cart={cart} setCart={setCart} onValidate={validateSale} clients={clients} onAddClient={addClient} shopName={shopName} shopId={shopId} />}
         {tab === "clients" && <ClientsTab shopName={shopName} clients={clients} sales={sales} isAdmin={isAdmin} onAddClient={addClient} onUpdateClient={updateClient} onRemoveClient={removeClient} onRecordPayment={recordClientPayment} loyaltyRate={loyaltyRate} />}
         {tab === "chantiers" && <ChantiersTab jobs={jobs} setJobs={setJobs} isAdmin={isAdmin} shopName={shopName} />}
         {tab === "inventaire" && <InventaireTab products={products} isAdmin={canStock} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
@@ -6072,8 +5974,6 @@ function AppInner() {
             shopName={shopName}
             setShopName={setShopName}
             onLeaveShop={leaveShop}
-            fedapayKey={fedapayKey}
-            setFedapayKey={setFedapayKey}
             gerantEmail={gerantEmail}
             setGerantEmail={setGerantEmail}
             alertPhones={alertPhones}
