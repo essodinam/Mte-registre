@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.22";
+const APP_VERSION = "3.9.23";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -569,7 +569,7 @@ function SignaturePad({ name, onSign, onCancel, title = "Signature de prise de s
    que le gérant voit dans l'Agenda. Si la caméra est refusée, on propose la signature
    à la main (le gérant voit alors « sans selfie »). onSign peut renvoyer un texte
    d'erreur (ex. « hors zone ») qui s'affiche ici sans fermer la fenêtre. */
-function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service", confirmLabel = "Valider et commencer" }) {
+function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service", confirmLabel = "Valider et commencer", cashMode = null, expectedCash = 0 }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -578,6 +578,9 @@ function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service
   const [photo, setPhoto] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
+  const [cash, setCash] = useState("");
+  const cashNum = cash === "" ? null : Math.max(0, parseFloat(cash) || 0);
+  const cashDiff = cashMode === "close" && cashNum != null ? cashNum - expectedCash : null;
 
   const stopCamera = () => {
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
@@ -624,10 +627,11 @@ function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service
   const retake = () => { setPhoto(null); setError(""); startCamera(); };
   const confirm = async () => {
     if (!photo || confirming) return;
+    if (cashMode && cashNum == null) { setError("Indique le montant de la caisse (0 si le tiroir est vide)."); return; }
     setConfirming(true);
     setError("");
     try {
-      const msg = await onSign(photo, "selfie");
+      const msg = await onSign(photo, "selfie", cashNum);
       if (typeof msg === "string" && msg) setError(msg);
     } finally {
       setConfirming(false);
@@ -635,7 +639,7 @@ function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service
   };
 
   if (useSignature) {
-    return <SignaturePad name={name} title={title.replace("Selfie", "Signature")} confirmLabel={confirmLabel} onSign={async (sig) => { const m = await onSign(sig, "signature"); if (typeof m === "string" && m) window.alert(m); }} onCancel={onCancel} />;
+    return <SignaturePad name={name} title={title.replace("Selfie", "Signature")} confirmLabel={confirmLabel} onSign={async (sig) => { const m = await onSign(sig, "signature", cashNum); if (typeof m === "string" && m) window.alert(m); }} onCancel={onCancel} />;
   }
 
   return (
@@ -660,6 +664,21 @@ function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service
             )}
           </div>
         )}
+        {cashMode && (
+          <div className="space-y-1">
+            <label className="text-xs" style={{ color: "#6B6558" }}>
+              {cashMode === "open" ? "Fond de caisse : espèces dans le tiroir maintenant (FCFA)" : "Espèces comptées dans le tiroir maintenant (FCFA)"}
+            </label>
+            <input type="number" inputMode="numeric" min="0" value={cash} onChange={(e) => setCash(e.target.value)} placeholder="0"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+            {cashMode === "close" && (
+              <p className="text-xs" style={{ color: cashDiff == null ? "#6B6558" : cashDiff === 0 ? "#16A34A" : "#DC4C3C" }}>
+                Attendu : {Math.round(expectedCash).toLocaleString("fr-FR")} FCFA
+                {cashDiff != null && (cashDiff === 0 ? " — caisse juste ✓" : ` — écart : ${cashDiff > 0 ? "+" : "−"}${Math.abs(Math.round(cashDiff)).toLocaleString("fr-FR")} FCFA`)}
+              </p>
+            )}
+          </div>
+        )}
         {error && <p className="text-xs text-center" style={{ color: "#DC4C3C" }}>{error}</p>}
         <div className="flex gap-2">
           {photo ? (
@@ -674,7 +693,7 @@ function SelfiePad({ name, onSign, onCancel, title = "Selfie de prise de service
           )}
         </div>
         {camError && (
-          <button onClick={() => { stopCamera(); setUseSignature(true); }} className="w-full text-xs underline" style={{ color: "#6B6558" }}>Caméra impossible : signer à la main (sans selfie)</button>
+          <button onClick={() => { if (cashMode && cashNum == null) { setError("Indique d'abord le montant de la caisse."); return; } stopCamera(); setUseSignature(true); }} className="w-full text-xs underline" style={{ color: "#6B6558" }}>Caméra impossible : signer à la main (sans selfie)</button>
         )}
         <button onClick={onCancel} className="w-full text-xs" style={{ color: "#6B6558" }}>Annuler</button>
       </div>
@@ -3055,7 +3074,7 @@ function DashboardTab({ sales, products, goal, setGoal }) {
 }
 
 /* ---------- Agenda des prises de service ---------- */
-function AgendaTab({ shifts }) {
+function AgendaTab({ shifts, attempts = [] }) {
   const byDay = useMemo(() => {
     const groups = {};
     [...shifts].sort((a, b) => b.time - a.time).forEach((s) => {
@@ -3065,12 +3084,28 @@ function AgendaTab({ shifts }) {
     return groups;
   }, [shifts]);
 
-  if (shifts.length === 0) {
+  const refused = [...(attempts || [])].sort((a, b) => b.time - a.time).slice(0, 20);
+
+  if (shifts.length === 0 && refused.length === 0) {
     return <div className="py-10 text-center text-sm" style={{ color: "#16A34A99" }}>Aucune prise de service enregistrée pour l'instant.</div>;
   }
 
   return (
     <div className="space-y-5">
+      {refused.length > 0 && (
+        <div className="rounded-lg p-3 space-y-2" style={{ background: "#DC4C3C10", border: "1px solid #DC4C3C55" }}>
+          <div className="text-xs uppercase tracking-wide" style={{ color: "#DC4C3C" }}>🚫 Prises de service refusées ({refused.length})</div>
+          {refused.map((a) => (
+            <div key={a.id} className="flex items-center gap-2">
+              {a.photo && <img src={a.photo} alt={`Selfie de ${a.name}`} className="h-12 w-9 object-cover rounded shrink-0" style={{ border: "1px solid #DCD5C6" }} />}
+              <div className="text-xs" style={{ color: "#1B1F1C" }}>
+                <strong>{a.name}</strong> ({a.role === "caissier" ? "caissier" : "vendeur"}) — {new Date(a.time).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                <div style={{ color: "#B23A2C" }}>{a.reason === "gps" ? "position introuvable" : `hors zone${a.distance != null ? ` (${a.distance >= 1000 ? `${(a.distance / 1000).toFixed(1)} km` : `${a.distance} m`})` : ""}`}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {Object.entries(byDay).map(([day, list]) => (
         <div key={day}>
           <div className="mb-2 px-1 text-xs uppercase tracking-wide" style={{ color: "#16A34A" }}>{day}</div>
@@ -3102,6 +3137,21 @@ function AgendaTab({ shifts }) {
                         <span style={{ color: "#16A34A" }}> · service en cours</span>
                       )}
                     </div>
+                    {s.endAuto && (
+                      <div className="text-[9px] mt-1 inline-block px-1.5 py-0.5 rounded-full" style={{ background: "#C08A3E22", color: "#C08A3E" }}>
+                        ⏰ fin oubliée — clôturé à {new Date(s.endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}, caisse non comptée
+                      </div>
+                    )}
+                    {s.openingCash != null && (
+                      <div className="text-[9px] mt-1 inline-block px-1.5 py-0.5 rounded-full mr-1" style={{ background: "#6B655822", color: "#6B6558" }}>
+                        💵 fond de caisse {Math.round(s.openingCash).toLocaleString("fr-FR")} FCFA
+                      </div>
+                    )}
+                    {s.cashDiff != null && (
+                      <div className="text-[9px] mt-1 inline-block px-1.5 py-0.5 rounded-full" style={{ background: s.cashDiff === 0 ? "#16A34A22" : "#DC4C3C22", color: s.cashDiff === 0 ? "#16A34A" : "#DC4C3C" }}>
+                        {s.cashDiff === 0 ? "💵 caisse juste" : `💵 ${s.cashDiff < 0 ? "manquant" : "excédent"} ${Math.abs(Math.round(s.cashDiff)).toLocaleString("fr-FR")} FCFA (attendu ${Math.round(s.expectedCash).toLocaleString("fr-FR")}, compté ${Math.round(s.countedCash).toLocaleString("fr-FR")})`}
+                      </div>
+                    )}
                     {s.endTime && s.endLocationFlag === "hors_zone" && (
                       <div className="text-[9px] mt-1 inline-block px-1.5 py-0.5 rounded-full" style={{ background: "#DC4C3C22", color: "#DC4C3C" }}>
                         ⚠️ fin hors zone{s.endDistance != null ? ` (${s.endDistance >= 1000 ? `${(s.endDistance / 1000).toFixed(1)} km` : `${s.endDistance} m`})` : ""}
@@ -4913,6 +4963,7 @@ function AppInner() {
   const [shopLocation, setShopLocation] = useShared(k("shopLocation"), null, pendingRef, bumpSync);
   const [shopLogoUrl, setShopLogoUrl] = useShared(k("shopLogo"), "", pendingRef, bumpSync);
   const [shifts, setShifts, shiftsLoaded] = useShared(k("shifts"), [], pendingRef, bumpSync);
+  const [attempts, setAttempts] = useShared(k("shiftAttempts"), [], pendingRef, bumpSync);
   const [expenses, setExpenses, expensesLoaded] = useShared(k("expenses"), [], pendingRef, bumpSync);
   const [fedapayKey, setFedapayKey, fedapayKeyLoaded] = useShared(k("fedapayKey"), "", pendingRef, bumpSync);
   const [gerantEmail, setGerantEmail] = useShared(k("gerantEmail"), "", pendingRef, bumpSync);
@@ -5303,7 +5354,14 @@ function AppInner() {
 
   const lowStockCount = useMemo(() => products.filter((p) => !p.isService && p.stock <= p.threshold).length, [products]);
 
-  const confirmSignature = async (signature, proofType = "selfie") => {
+  const notifyOwner = (payload) => {
+    if (!shopId || shopId === TEST_SHOP_CODE || String(shopId).startsWith(DEMO_PREFIX)) return;
+    try {
+      fetch("/api/notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, shopName, ...payload }) }).catch(() => {});
+    } catch (e) { /* une alerte ratée ne doit jamais gêner le travail */ }
+  };
+
+  const confirmSignature = async (signature, proofType = "selfie", cashAmount = null) => {
     // Prise de service : selfie + position GPS. Pour un vendeur ou un caissier, la prise
     // de service est REFUSÉE hors du commerce (ou si la position est indisponible), dès que
     // le gérant a enregistré l'emplacement du commerce. Le gérant n'est pas bloqué : il peut
@@ -5323,13 +5381,18 @@ function AppInner() {
       gpsFailed = true;
     }
     if (pendingUser.role !== "gerant" && shopLocation) {
-      if (gpsFailed) return "Position introuvable. Active la localisation (GPS) du téléphone pour ce site, puis réessaie.";
-      if (locationFlag === "hors_zone") {
+      if (gpsFailed || locationFlag === "hors_zone") {
+        const reason = gpsFailed ? "gps" : "zone";
+        setAttempts((prev) => [...(prev || []), { id: uid(), time: Date.now(), name: pendingUser.name, role: pendingUser.role, reason, distance, photo: proofType === "selfie" ? signature : null }]
+          .slice(-60).map((a, i, arr) => (i < arr.length - 15 ? { ...a, photo: null } : a)));
+        notifyOwner({ type: "refused", name: pendingUser.name, role: pendingUser.role, reason, distance, photo: proofType === "selfie" ? signature : null });
+        if (gpsFailed) return "Position introuvable. Active la localisation (GPS) du téléphone pour ce site, puis réessaie.";
         const d = distance >= 1000 ? `${(distance / 1000).toFixed(1)} km` : `${distance} m`;
         return `Tu es à ${d} du commerce (maximum ${SHOP_RADIUS_METERS} m). La prise de service n'est possible que sur place.`;
       }
     }
-    setShifts((prev) => [...prev, { id: uid(), personId: pendingUser.id || null, name: pendingUser.name, role: pendingUser.role, time: Date.now(), signature, proofType, location, distance, locationFlag }]);
+    setShifts((prev) => [...prev, { id: uid(), personId: pendingUser.id || null, name: pendingUser.name, role: pendingUser.role, time: Date.now(), signature, proofType, location, distance, locationFlag, openingCash: cashAmount }]);
+    notifyOwner({ type: "start", name: pendingUser.name, role: pendingUser.role, flag: locationFlag, distance, openingCash: cashAmount, photo: proofType === "selfie" ? signature : null });
     setCurrentUser(pendingUser);
     setLoginDate(new Date().toDateString());
     // Propose l'empreinte digitale si l'appareil la supporte et qu'elle n'est pas
@@ -5344,7 +5407,20 @@ function AppInner() {
   // clôturer le shift en cours. Permet de calculer les heures travaillées (utilisées
   // dans l'onglet Paie) et évite qu'un shift reste ouvert indéfiniment.
   const [endingService, setEndingService] = useState(false);
-  const confirmEndSignature = async (signature, proofType = "selfie") => {
+  const expectedCashFor = (shift) => {
+    const since = shift?.time || 0;
+    const mine = (sales || []).filter((x) => x.date >= since && x.paymentMethod === "especes" && (x.sellerId ? x.sellerId === shift.personId : x.sellerName === shift.name));
+    return (Number(shift?.openingCash) || 0) + mine.reduce((a, x) => a + (Number(x.total) || 0), 0);
+  };
+  const currentOpenShift = (() => {
+    if (!currentUser) return null;
+    for (let i = (shifts || []).length - 1; i >= 0; i--) {
+      const s2 = shifts[i];
+      if (!s2.endTime && s2.name === currentUser.name && s2.role === currentUser.role) return s2;
+    }
+    return null;
+  })();
+  const confirmEndSignature = async (signature, proofType = "selfie", countedCash = null) => {
     let locationFlag = "non_verifiee";
     let distance = null;
     let location = null;
@@ -5357,6 +5433,10 @@ function AppInner() {
     } catch (e) {
       locationFlag = "non_verifiee";
     }
+    // Caisse : fond de caisse + ventes en espèces de la personne pendant son service = attendu
+    const cashInfo = countedCash != null && currentOpenShift
+      ? (() => { const expected = expectedCashFor(currentOpenShift); return { expectedCash: expected, countedCash, cashDiff: countedCash - expected }; })()
+      : {};
     setShifts((prev) => {
       let idx = -1;
       for (let i = prev.length - 1; i >= 0; i--) {
@@ -5365,12 +5445,41 @@ function AppInner() {
       }
       if (idx === -1) return prev;
       const copy = [...prev];
-      copy[idx] = { ...copy[idx], endTime: Date.now(), endSignature: signature, endProofType: proofType, endLocation: location, endDistance: distance, endLocationFlag: locationFlag };
+      copy[idx] = { ...copy[idx], endTime: Date.now(), endSignature: signature, endProofType: proofType, endLocation: location, endDistance: distance, endLocationFlag: locationFlag, ...cashInfo };
       return copy;
     });
+    notifyOwner({ type: "end", name: currentUser?.name, role: currentUser?.role, ...cashInfo });
     setEndingService(false);
     setCurrentUser(null);
   };
+
+  // Service oublié : un service resté ouvert la veille, ou plus de 2 h après l'heure de
+  // fermeture, est clôturé automatiquement à l'heure de fermeture. La caisse n'est alors
+  // pas comptée, et le gérant est prévenu (Agenda + Telegram).
+  useEffect(() => {
+    if (!shiftsLoaded || !hoursLoaded || !shopId) return undefined;
+    const check = () => {
+      const [ch, cm] = String(hours?.close || "18:00").split(":").map((x) => parseInt(x, 10) || 0);
+      const now = Date.now();
+      const toClose = [];
+      (shifts || []).forEach((s2) => {
+        if (s2.endTime) return;
+        const closeAt = new Date(s2.time); closeAt.setHours(ch, cm, 0, 0);
+        if (closeAt.getTime() <= s2.time) closeAt.setDate(closeAt.getDate() + 1); // service commencé après la fermeture : on clôture au lendemain
+        if (now >= closeAt.getTime() + 2 * 3600000) toClose.push({ id: s2.id, at: closeAt.getTime(), name: s2.name, role: s2.role });
+      });
+      if (!toClose.length) return;
+      setShifts((prev) => prev.map((s2) => {
+        const hit = toClose.find((c) => c.id === s2.id);
+        return hit && !s2.endTime ? { ...s2, endTime: hit.at, endAuto: true } : s2;
+      }));
+      toClose.forEach((c) => notifyOwner({ type: "auto_close", name: c.name, role: c.role, closeTime: new Date(c.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) }));
+    };
+    check();
+    const t = setInterval(check, 5 * 60 * 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftsLoaded, hoursLoaded, shifts, hours, shopId]);
 
   // Déconnexion automatique à chaque nouvelle journée (mode test et vrais commerces).
   useEffect(() => {
@@ -5751,7 +5860,7 @@ function AppInner() {
           />
         )}
         {pendingUser && (
-          <SelfiePad name={pendingUser.name} onSign={confirmSignature} onCancel={() => setPendingUser(null)} />
+          <SelfiePad name={pendingUser.name} cashMode={pendingUser.role === "caissier" ? "open" : null} onSign={confirmSignature} onCancel={() => setPendingUser(null)} />
         )}
       </>
     );
@@ -5902,7 +6011,7 @@ function AppInner() {
         {tab === "chantiers" && <ChantiersTab jobs={jobs} setJobs={setJobs} isAdmin={isAdmin} shopName={shopName} />}
         {tab === "inventaire" && <InventaireTab products={products} isAdmin={canStock} onRequestGerant={() => { setCurrentUser(null); requestGerantLogin(); }} onValidateInventory={validateInventory} />}
         {tab === "historique" && <HistoriqueTab sales={sales} />}
-        {tab === "agenda" && <AgendaTab shifts={shifts} />}
+        {tab === "agenda" && <AgendaTab shifts={shifts} attempts={attempts} />}
         {tab === "paie" && (
           <PaieTab
             sales={sales}
@@ -6022,6 +6131,8 @@ function AppInner() {
           name={currentUser.name}
           title="Selfie de fin de service"
           confirmLabel="Valider et terminer"
+          cashMode={currentUser.role === "caissier" && currentOpenShift && currentOpenShift.openingCash != null ? "close" : null}
+          expectedCash={currentOpenShift ? expectedCashFor(currentOpenShift) : 0}
           onSign={confirmEndSignature}
           onCancel={() => setEndingService(false)}
         />
