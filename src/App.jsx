@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.25";
+const APP_VERSION = "3.9.26";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -281,6 +281,26 @@ function Logo({ size = 40, letter = WELCOME_LETTER }) {
         {letter}
       </text>
       <rect x="92" y="176" width="56" height="5" rx="2" fill="#C08A3E" />
+    </svg>
+  );
+}
+
+/* ---------- Logo horizontal KABATEC Consulting (pictogramme + nom + signature) ---------- */
+function BrandLogo({ width = 320 }) {
+  const font = "Montserrat, 'Arial Black', 'Helvetica Neue', Arial, sans-serif";
+  return (
+    <svg width={width} viewBox="0 0 520 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KABATEC Consulting">
+      {/* pictogramme : maison + lettre K */}
+      <path d="M14 70 L68 22 L122 70 L122 112 L14 112 Z" fill="none" stroke="#C08A3E" strokeWidth="9" strokeLinejoin="round" />
+      <rect x="82" y="12" width="14" height="30" fill="#1B1F1C" />
+      <path d="M44 58 V98 M44 80 L76 58 M54 74 L78 98" stroke="#1B1F1C" strokeWidth="10" strokeLinecap="round" fill="none" />
+      <path d="M6 124 Q60 106 134 112" stroke="#C08A3E" strokeWidth="5" fill="none" strokeLinecap="round" />
+      {/* nom */}
+      <rect x="150" y="14" width="360" height="5" rx="2.5" fill="#C08A3E" />
+      <text x="146" y="86" fontFamily={font} fontWeight="900" fontSize="74" fill="#1B1F1C" textLength="366" lengthAdjust="spacingAndGlyphs">KABATEC</text>
+      <text x="150" y="116" fontFamily={font} fontWeight="700" fontSize="14" fill="#1B1F1C" textLength="360" lengthAdjust="spacingAndGlyphs">
+        CONSULTING <tspan fill="#C08A3E">●</tspan> QUINCAILLERIE <tspan fill="#C08A3E">●</tspan> SERVICES <tspan fill="#C08A3E">●</tspan> ET PLUS
+      </text>
     </svg>
   );
 }
@@ -695,16 +715,16 @@ const CATEGORY_SHOWCASE = [
 function CategoryShowcase() {
   // Photos détourées (fond retiré), présentées dans des cercles.
   return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-4 mb-1 justify-items-center">
+    <div className="grid grid-cols-4 gap-x-2 mb-1 justify-items-center">
       {CATEGORY_SHOWCASE.map(({ key, label, image }) => (
-        <div key={key} className="w-full max-w-[150px] flex flex-col items-center">
+        <div key={key} className="w-full max-w-[92px] flex flex-col items-center">
           <div
             className="w-full aspect-square rounded-full overflow-hidden flex items-center justify-center"
             style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", boxShadow: "0 2px 8px #1B1F1C14" }}
           >
             <img src={image} alt={label} className="w-[78%] h-[78%] object-contain" />
           </div>
-          <span className="mt-1.5 text-[11px] text-center leading-tight" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>
+          <span className="mt-1.5 text-[10px] text-center leading-tight" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>
             {label}
           </span>
         </div>
@@ -1132,8 +1152,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
       <div className="w-full max-w-sm space-y-5">
         <CategoryShowcase />
         <div className="flex flex-col items-center text-center">
-          <Logo size={64} letter={WELCOME_LETTER} />
-          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl mt-2">{WELCOME_TITLE}</h1>
+          <BrandLogo width={300} />
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Bienvenue</p>
         </div>
         {knownShops && knownShops.length > 0 && (
