@@ -164,7 +164,13 @@ export default async function handler(req, res) {
             stats[s.code] = { total: arr.reduce((t, v) => t + (Number(v.total) || 0), 0), count: arr.length, lastActivity: arr.length ? Math.max(...arr.map((v) => Number(v.date) || 0)) : null };
           } catch (e) { stats[s.code] = { total: 0, count: 0, lastActivity: null }; }
         }));
-        return res.status(200).json({ shops, stats });
+        // Profils des commerçants inscrits en ligne (table protégée user_profiles).
+        let profiles = {}, leads = [];
+        try {
+          const pr = await (await must(await rest("user_profiles?select=shop_id,first_name,last_name,age,phone,email,city,country,business_name,months,status,created_at,paid_at&order=created_at.desc&limit=500"))).json();
+          for (const p of pr) { if (p.status === "paye") profiles[p.shop_id] = p; else leads.push(p); }
+        } catch (e) { /* table absente : on ignore */ }
+        return res.status(200).json({ shops, stats, profiles, leads });
       }
 
       case "setSubscription": {
@@ -179,6 +185,7 @@ export default async function handler(req, res) {
       case "deleteShop": {
         if (!validCode(target)) return res.status(400).json({ error: "Code de commerce invalide." });
         await deleteShop(target);
+        try { await rest(`user_profiles?shop_id=eq.${encodeURIComponent(target)}`, { method: "DELETE" }); } catch (e) {}
         const reg = await readKey(REGISTRY_KEY);
         await writeKey(REGISTRY_KEY, (Array.isArray(reg) ? reg : []).filter((s) => s.code !== target));
         return res.status(200).json({ ok: true });

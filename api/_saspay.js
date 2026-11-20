@@ -85,13 +85,39 @@ export async function settle(c, pending) {
   if (!claimed.length) return { paid: true };
   if (pending.kind === "sale") return { paid: true }; // vente en boutique : pas d'abonnement à prolonger
   try {
-    const until = await extendSubscription(c, pending.shop_id, pending.months);
+    const until = pending.kind === "signup" ? await activateSignup(c, pending) : await extendSubscription(c, pending.shop_id, pending.months);
     return { paid: true, until };
   } catch (e) {
     // Échec : on libère la ligne pour pouvoir réessayer.
     await rest(`saspay_pending?ref=eq.${encodeURIComponent(pending.ref)}`, { method: "PATCH", body: JSON.stringify({ applied_at: null }) });
     throw e;
   }
+}
+
+// Message Telegram au propriétaire (facultatif : sans TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, ne fait rien).
+export async function telegram(text) {
+  const TOKEN = process.env.TELEGRAM_BOT_TOKEN, CHAT = process.env.TELEGRAM_CHAT_ID;
+  if (!TOKEN || !CHAT) return;
+  try { await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: CHAT, text }) }); } catch (e) { /* une alerte ratée ne doit rien bloquer */ }
+}
+
+// Inscription payée : crée le commerce dans le registre (une seule fois grâce à la « réservation » de settle)
+// avec l'abonnement acheté, puis marque le profil comme payé.
+export async function activateSignup(c, pending) {
+  const { rest, must } = db(c);
+  const r = await must(await rest(`kv_store?key=eq.${encodeURIComponent(REGISTRY_KEY)}&select=value`));
+  const rows = await r.json();
+  const list = Array.isArray(rows[0]?.value) ? rows[0].value : [];
+  const until = new Date();
+  until.setMonth(until.getMonth() + (pending.months || 1));
+  if (!list.some((s) => s.code === pending.shop_id)) {
+    list.push({ code: pending.shop_id, businessType: null, createdAt: new Date().toISOString(), subscriptionUntil: until.toISOString(), source: "inscription" });
+    await must(await rest("kv_store", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ key: REGISTRY_KEY, value: list, updated_at: new Date().toISOString() }) }));
+  }
+  const pr = await must(await rest(`user_profiles?shop_id=eq.${encodeURIComponent(pending.shop_id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "paye", paid_at: new Date().toISOString() }) }));
+  const prof = (await pr.json())[0];
+  await telegram(`🆕 Nouveau commerce payé : ${prof ? `${prof.business_name} — ${prof.first_name} ${prof.last_name}, ${prof.phone}${prof.city ? `, ${prof.city}` : ""}` : pending.shop_id}\nCode : ${pending.shop_id} · ${pending.months} mois · ${Number(pending.amount).toLocaleString("fr-FR")} FCFA`);
+  return until.toISOString();
 }
 
 export const saleShops = () => (process.env.SASPAY_SALE_SHOPS || "").split(",").map((x) => x.trim()).filter(Boolean);

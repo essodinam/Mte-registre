@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.24";
+const APP_VERSION = "3.9.25";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -727,6 +727,8 @@ function DevPanel({ onOpenShop, onClose }) {
   const [gate, setGate] = useState(true);
   const [error, setError] = useState("");
   const [shops, setShops] = useState(null);
+  const [profiles, setProfiles] = useState({}); // profils des commerçants inscrits en ligne
+  const [leads, setLeads] = useState([]); // inscriptions commencées mais non payées
   const [loadError, setLoadError] = useState("");
   const [editingCode, setEditingCode] = useState(null);
   const [editDateValue, setEditDateValue] = useState("");
@@ -771,6 +773,8 @@ function DevPanel({ onOpenShop, onClose }) {
       list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
       setShops(list);
       setShopStats(data.stats || {});
+      setProfiles(data.profiles || {});
+      setLeads(data.leads || []);
       setGate(false);
       setError("");
     } catch (e) {
@@ -925,6 +929,12 @@ function DevPanel({ onOpenShop, onClose }) {
                       {BUSINESS_TYPES[s.businessType]?.label || "Type non défini"}
                       {s.createdAt ? ` · créé le ${new Date(s.createdAt).toLocaleDateString("fr-FR")}` : ""}
                     </span>
+                    {profiles[s.code] && (
+                      <span className="text-xs block mt-0.5" style={{ color: "#1B1F1C" }}>
+                        👤 {profiles[s.code].first_name} {profiles[s.code].last_name} · {profiles[s.code].age} ans · {profiles[s.code].phone}
+                        {profiles[s.code].city ? ` · ${profiles[s.code].city}` : ""}{profiles[s.code].business_name ? ` — ${profiles[s.code].business_name}` : ""}
+                      </span>
+                    )}
                     {stat && (
                       <span className="text-xs block mt-0.5" style={{ color: stat.count > 0 ? "#16A34A" : "#6B6558" }}>
                         {stat.count} vente{stat.count > 1 ? "s" : ""} · {fmt(stat.total)} FCFA
@@ -974,9 +984,89 @@ function DevPanel({ onOpenShop, onClose }) {
   );
 }
 
+/* ---------- Inscription en ligne : profil du commerçant + paiement de l'abonnement (SasPay) ---------- */
+function SignupForm({ onBack }) {
+  const [f, setF] = useState({ firstName: "", lastName: "", age: "", phone: "", email: "", city: "", businessName: "", months: 1, consent: false, website: "" });
+  const [plans, setPlans] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const call = async (payload) => {
+    const r = await fetch("/api/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "Erreur");
+    return j;
+  };
+  useEffect(() => { call({ action: "plans" }).then(setPlans).catch(() => setPlans({ enabled: false })); }, []);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const total = plans?.price ? plans.price * f.months : 0;
+  const submit = async () => {
+    setErr("");
+    const age = Number(f.age);
+    if (!f.firstName.trim() || !f.lastName.trim()) return setErr("Indique ton prénom et ton nom.");
+    if (!(age >= 18)) return setErr("L'inscription est réservée aux personnes de 18 ans et plus.");
+    if (!/^\+?[\d\s]{8,18}$/.test(f.phone.trim())) return setErr("Numéro de téléphone invalide.");
+    if (!f.businessName.trim()) return setErr("Indique le nom de ton commerce.");
+    if (!f.consent) return setErr("Coche la case pour accepter l'enregistrement de tes informations.");
+    setBusy(true);
+    try {
+      const j = await call({ action: "start", months: f.months, consent: true, website: f.website, profile: { firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
+      try { localStorage.setItem("kabatec-signupref", j.ref); } catch (e) {}
+      window.location.href = j.url;
+    } catch (e) { setErr(e.message || "Inscription impossible pour le moment."); setBusy(false); }
+  };
+  const inp = "w-full px-3 py-2.5 rounded-lg outline-none text-sm";
+  const st = { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" };
+  const lab = (t) => <span className="text-xs block mb-1" style={{ color: "#6B6558" }}>{t}</span>;
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+      <div className="w-full max-w-sm space-y-3">
+        <div className="text-center">
+          <Logo size={48} />
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl mt-1">Créer mon commerce</h1>
+          <p className="text-xs mt-1" style={{ color: "#6B6558" }}>Remplis ton profil, paie ton abonnement : ton commerce est créé aussitôt.</p>
+        </div>
+        {plans && !plans.enabled && <p className="text-sm text-center p-3 rounded-lg" style={{ background: "#DC4C3C1A", color: "#DC4C3C" }}>L'inscription en ligne n'est pas disponible pour le moment.</p>}
+        <div className="grid grid-cols-2 gap-2">
+          <label>{lab("Prénom *")}<input value={f.firstName} onChange={set("firstName")} autoComplete="given-name" maxLength={40} className={inp} style={st} /></label>
+          <label>{lab("Nom *")}<input value={f.lastName} onChange={set("lastName")} autoComplete="family-name" maxLength={40} className={inp} style={st} /></label>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <label>{lab("Âge *")}<input value={f.age} onChange={set("age")} inputMode="numeric" maxLength={3} className={inp} style={st} /></label>
+          <label className="col-span-2">{lab("Téléphone *")}<input value={f.phone} onChange={set("phone")} inputMode="tel" autoComplete="tel" placeholder="+228 …" maxLength={20} className={inp} style={st} /></label>
+        </div>
+        <label className="block">{lab("E-mail (facultatif)")}<input value={f.email} onChange={set("email")} type="email" autoComplete="email" maxLength={80} className={inp} style={st} /></label>
+        <div className="grid grid-cols-2 gap-2">
+          <label>{lab("Ville")}<input value={f.city} onChange={set("city")} maxLength={60} className={inp} style={st} /></label>
+          <label>{lab("Pays")}<input value="Togo" disabled className={inp} style={{ ...st, opacity: 0.6 }} /></label>
+        </div>
+        <label className="block">{lab("Nom de ton commerce *")}<input value={f.businessName} onChange={set("businessName")} maxLength={60} className={inp} style={st} /></label>
+        <input value={f.website} onChange={set("website")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
+        <div>
+          {lab("Durée de l'abonnement")}
+          <div className="grid grid-cols-4 gap-1.5">
+            {(plans?.options || [1, 3, 6, 12]).map((m) => (
+              <button key={m} type="button" onClick={() => setF((x) => ({ ...x, months: m }))} className="py-2 rounded-lg text-sm" style={f.months === m ? { background: "#1B1F1C", color: "#F0ECE3" } : { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>{m} mois</button>
+            ))}
+          </div>
+          {total > 0 && <p className="text-sm text-center mt-2" style={{ color: "#1B1F1C" }}>À payer : <b>{total.toLocaleString("fr-FR")} FCFA</b></p>}
+        </div>
+        <label className="flex items-start gap-2 text-xs" style={{ color: "#6B6558" }}>
+          <input type="checkbox" checked={f.consent} onChange={(e) => setF((x) => ({ ...x, consent: e.target.checked }))} className="mt-0.5" />
+          <span>J'ai 18 ans ou plus et j'accepte que KABATEC Consulting enregistre ces informations pour créer et gérer mon compte.</span>
+        </label>
+        {err && <p className="text-xs text-center" style={{ color: "#DC4C3C" }}>{err}</p>}
+        <button disabled={busy || !plans?.enabled} onClick={submit} className="w-full py-3 rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
+          {busy ? "Redirection vers le paiement…" : "Payer et créer mon commerce"}
+        </button>
+        <button onClick={onBack} className="w-full text-xs" style={{ color: "#6B6558" }}>Retour</button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Écran d'accueil ---------- */
-function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget }) {
-  const [mode, setMode] = useState(null); // null | 'join'
+function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget, onSignedUp }) {
+  const [mode, setMode] = useState(null); // null | 'join' | 'signup'
   const [code, setCode] = useState("");
   const [ownerGate, setOwnerGate] = useState(false);
   const [ownerError, setOwnerError] = useState("");
@@ -1004,6 +1094,8 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget 
       onCreate();
     } catch (e) { setOwnerError(e?.message || "Empreinte refusée."); }
   };
+
+  if (mode === "signup") return <SignupForm onBack={() => setMode(null)} />;
 
   if (mode === "join") {
     return (
@@ -1077,6 +1169,13 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget 
             <span>
               <span style={{ fontFamily: "'Carlito', sans-serif" }} className="block">Rejoindre un commerce</span>
               <span className="text-xs block mt-0.5" style={{ color: "#6B6558" }}>J'ai déjà un code</span>
+            </span>
+          </button>
+          <button onClick={() => setMode("signup")} className="w-full p-4 rounded-lg text-left flex items-center gap-3" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
+            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: "#C08A3E", color: "#1B1F1C" }}><Sparkles size={16} /></span>
+            <span>
+              <span style={{ fontFamily: "'Carlito', sans-serif" }} className="block">Créer mon commerce</span>
+              <span className="text-xs block mt-0.5" style={{ color: "#DCD5C6" }}>Je m'inscris en ligne et je paie mon abonnement</span>
             </span>
           </button>
         </div>
@@ -4820,6 +4919,38 @@ function AppInner() {
     return () => { stop = true; };
   }, []);
   const [newShopCode, setNewShopCode] = useState(null); // affiché juste après une création de commerce
+  const [signupMsg, setSignupMsg] = useState("");
+  // Retour du paiement d'inscription : on vérifie chez SasPay, puis on ouvre le commerce créé.
+  useEffect(() => {
+    let ref = "";
+    try { ref = new URLSearchParams(window.location.search).get("signup") || localStorage.getItem("kabatec-signupref") || ""; } catch (e) {}
+    if (!/^[a-f0-9]{32}$/.test(ref)) return;
+    let stop = false, tries = 0;
+    setSignupMsg("Vérification de ton paiement…");
+    const check = async () => {
+      if (stop) return;
+      tries += 1;
+      try {
+        const r = await fetch("/api/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "status", ref }) });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.paid && j.shopCode) {
+          try { localStorage.removeItem("kabatec-signupref"); } catch (e) {}
+          try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+          setSignupMsg("");
+          setShopId(j.shopCode);
+          setNewShopCode(j.shopCode);
+          rememberShop(j.shopCode, null);
+          try { await storage.set("shopId", j.shopCode, false); } catch (e) {}
+          return;
+        }
+        if (r.status === 404) { try { localStorage.removeItem("kabatec-signupref"); } catch (e) {} setSignupMsg(""); return; }
+      } catch (e) {}
+      if (tries < 45) setTimeout(check, 4000);
+      else { setSignupMsg("Paiement non confirmé pour l'instant. Si tu as payé, rouvre l'application dans quelques minutes : ton commerce sera créé."); }
+    };
+    check();
+    return () => { stop = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -5647,7 +5778,12 @@ function AppInner() {
   }
 
   if (!shopId) {
-    return <ShopScreen onCreate={createShop} onJoin={joinShop} onDevOpen={joinShop} onDemo={startDemo} knownShops={knownShops} onForget={forgetShop} />;
+    return (
+      <>
+        {signupMsg && <div className="fixed top-0 inset-x-0 z-50 p-3 text-center text-sm" style={{ background: "#C08A3E", color: "#1B1F1C" }}>{signupMsg}</div>}
+        <ShopScreen onCreate={createShop} onJoin={joinShop} onDevOpen={joinShop} onDemo={startDemo} knownShops={knownShops} onForget={forgetShop} />
+      </>
+    );
   }
 
   if (!ready) {
