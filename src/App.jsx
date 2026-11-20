@@ -1237,6 +1237,10 @@ function ShopCodeReveal({ code, onContinue }) {
         <div className="py-3 rounded-lg text-xl tracking-[0.3em]" style={{ background: "#F0ECE3", border: "1px solid #C08A3E55", color: "#8A6A2E", fontFamily: "'Carlito', sans-serif" }}>
           {code}
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <a href={`https://wa.me/?text=${encodeURIComponent(`Mon code de commerce KABATEC : ${code}`)}`} target="_blank" rel="noreferrer" className="py-2 rounded-lg text-xs font-medium" style={{ background: "#16A34A1A", color: "#16A34A", border: "1px solid #16A34A55" }}>Envoyer par WhatsApp</a>
+          <a href={`mailto:?subject=${encodeURIComponent("Mon code de commerce KABATEC")}&body=${encodeURIComponent(`Mon code de commerce : ${code}`)}`} className="py-2 rounded-lg text-xs font-medium" style={{ background: "#FFFFFF", color: "#1B1F1C", border: "1px solid #DCD5C6" }}>Envoyer par e-mail</a>
+        </div>
         <p className="text-[10px]" style={{ color: "#8A6A2E" }}>Tu pourras le retrouver plus tard dans Réglages.</p>
         <button onClick={onContinue} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
           J'ai noté, continuer

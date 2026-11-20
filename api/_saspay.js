@@ -101,6 +101,26 @@ export async function telegram(text) {
   try { await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: CHAT, text }) }); } catch (e) { /* une alerte ratée ne doit rien bloquer */ }
 }
 
+// Envoie le code du commerce par e-mail au commerçant (service Resend). Sans RESEND_API_KEY, ne fait rien.
+//   RESEND_API_KEY  clé Resend ; RESEND_FROM  expéditeur, ex. « KABATEC <contact@ton-domaine.com> » (domaine vérifié chez Resend)
+async function emailCode(to, first, code, months) {
+  const KEY = process.env.RESEND_API_KEY;
+  if (!KEY || !to) return;
+  const from = process.env.RESEND_FROM || "KABATEC Consulting <onboarding@resend.dev>";
+  const app = (process.env.APP_URL || "https://mte-registre.vercel.app").replace(/\/$/, "");
+  const esc = (x) => String(x).replace(/[<>&"]/g, "");
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from, to: [to], subject: "Ton commerce KABATEC est créé — voici ton code",
+        html: `<div style="font-family:Arial,sans-serif;max-width:480px"><h2>Bienvenue ${esc(first)} !</h2><p>Ton paiement est confirmé : ton abonnement de ${months} mois est actif.</p><p>Ton code de commerce :</p><p style="font-size:26px;letter-spacing:4px;font-weight:bold;background:#F0ECE3;padding:12px;text-align:center">${esc(code)}</p><p>Garde-le précieusement : il sert à connecter tes autres appareils et tes employés.</p><p><a href="${app}">Ouvrir l'application</a></p><p style="color:#777;font-size:12px">KABATEC Consulting</p></div>`,
+      }),
+    });
+  } catch (e) { /* un e-mail raté ne doit rien bloquer */ }
+}
+
 // Inscription payée : crée le commerce dans le registre (une seule fois grâce à la « réservation » de settle)
 // avec l'abonnement acheté, puis marque le profil comme payé.
 export async function activateSignup(c, pending) {
@@ -118,6 +138,7 @@ export async function activateSignup(c, pending) {
   }
   const pr = await must(await rest(`user_profiles?shop_id=eq.${encodeURIComponent(pending.shop_id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "paye", paid_at: new Date().toISOString() }) }));
   const prof = (await pr.json())[0];
+  if (prof) await emailCode(prof.email, prof.first_name, pending.shop_id, pending.months);
   await telegram(`🆕 Nouveau commerce payé : ${prof ? `${prof.business_name} — ${prof.first_name} ${prof.last_name}, ${prof.phone}${prof.city ? `, ${prof.city}` : ""}` : pending.shop_id}\nCode : ${pending.shop_id} · ${pending.months} mois · ${Number(pending.amount).toLocaleString("fr-FR")} FCFA`);
   return until.toISOString();
 }
