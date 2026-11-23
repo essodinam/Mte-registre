@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.26";
+const APP_VERSION = "3.9.27";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -1023,7 +1023,7 @@ function SignupForm({ onBack, businessType }) {
   const st = { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" };
   const lab = (t) => <span className="text-xs block mb-1" style={{ color: "#6B6558" }}>{t}</span>;
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
       <div className="w-full max-w-sm space-y-3">
         <div className="text-center">
           <Logo size={48} />
@@ -1105,7 +1105,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
 
   if (mode === "join") {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={56} />
@@ -1134,7 +1134,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
       <div className="w-full max-w-sm space-y-5">
         <div className="flex flex-col items-center text-center">
           <BrandLogo width={320} />
@@ -1238,7 +1238,7 @@ function ShopCodeReveal({ code, onContinue }) {
 
 function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCaissier, biometricCreds, onBack }) {
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
       <div className="w-full max-w-sm space-y-5">
         {onBack && (
           <button onClick={onBack} className="flex items-center gap-1.5 text-sm" style={{ color: "#6B6558" }}>
@@ -5759,7 +5759,7 @@ function AppInner() {
 
   if (!shopIdLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#F0ECE3" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "transparent" }}>
         <div style={{ color: "#16A34A", fontFamily: "'Carlito', sans-serif" }} className="text-sm animate-pulse">Ouverture du registre…</div>
       </div>
     );
@@ -5776,7 +5776,7 @@ function AppInner() {
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#F0ECE3" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "transparent" }}>
         <div style={{ color: "#16A34A", fontFamily: "'Carlito', sans-serif" }} className="text-sm animate-pulse">Ouverture du registre…</div>
       </div>
     );
@@ -5786,7 +5786,7 @@ function AppInner() {
 
   if (newShopCode) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
         <style>{fontImport}</style>
         <ShopCodeReveal code={newShopCode} onContinue={() => setNewShopCode(null)} />
       </div>
@@ -5795,7 +5795,7 @@ function AppInner() {
 
   if (!businessType) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
         <style>{fontImport}</style>
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
@@ -5821,7 +5821,7 @@ function AppInner() {
 
   if (subBlocked) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#F0ECE3" }}>
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
         <style>{fontImport}</style>
         <div className="w-full max-w-sm space-y-4 text-center">
           <Logo size={56} />
@@ -5906,7 +5906,7 @@ function AppInner() {
   ];
 
   return (
-    <div className="min-h-screen" style={{ background: "#F0ECE3" }}>
+    <div className="min-h-screen" style={{ background: "transparent" }}>
       <style>{`
         ${fontImport}
         * { font-family: 'Carlito', sans-serif; }

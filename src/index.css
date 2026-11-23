@@ -7,4 +7,14 @@ html, body, #root {
 }
 body {
   font-family: 'Inter', sans-serif;
+  color: #1B1F1C;
+  background-color: #F0ECE3;
+  /* Fond « SaaS » : halo doré en haut à gauche, ombre douce en bas à droite, fine trame de points */
+  background-image:
+    radial-gradient(900px 520px at 6% -6%, rgba(192, 138, 62, 0.26), transparent 62%),
+    radial-gradient(760px 560px at 104% 104%, rgba(27, 31, 28, 0.13), transparent 62%),
+    radial-gradient(520px 360px at 100% 0%, rgba(192, 138, 62, 0.10), transparent 70%),
+    radial-gradient(rgba(27, 31, 28, 0.075) 1px, transparent 1.2px);
+  background-size: auto, auto, auto, 22px 22px;
+  background-attachment: fixed;
 }
