@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.30";
+const APP_VERSION = "3.9.31";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -1019,6 +1019,7 @@ function SignupForm({ onBack, businessType }) {
     return j;
   };
   useEffect(() => { call({ action: "plans" }).then(setPlans).catch(() => setPlans({ enabled: false })); }, []);
+  useEffect(() => { getCaptcha("load"); }, []); // charge reCAPTCHA dès l'ouverture du formulaire (logo en bas à droite)
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const total = plans?.price ? plans.price * f.months : 0;
   const submit = async () => {
