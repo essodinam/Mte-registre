@@ -287,7 +287,7 @@ function Logo({ size = 40, letter = WELCOME_LETTER }) {
 
 /* ---------- Logo horizontal KABATEC Consulting (pictogramme + nom + signature) ---------- */
 function BrandLogo({ width = 320 }) {
-  return <img src="/kabatec-logo.png" alt="KABATEC Consulting" width={width} style={{ maxWidth: "100%", height: "auto" }} />;
+  return <img src="/kabatec-logo.png" alt="KABATEC Consulting" width={width} style={{ maxWidth: "100%", height: "auto", borderRadius: 22, boxShadow: "0 2px 10px #1B1F1C1F" }} />;
 }
 
 /* ---------- Synchronisation résiliente (file d'attente hors-ligne) ---------- */
@@ -1138,7 +1138,6 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
       <div className="w-full max-w-sm space-y-5">
         <div className="flex flex-col items-center text-center">
           <BrandLogo width={320} />
-          <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Bienvenue — touche ton activité pour créer ton commerce</p>
         </div>
         <CategoryShowcase onPick={(t) => { setPickedType(t); setMode("signup"); }} />
         {knownShops && knownShops.length > 0 && (
@@ -1177,29 +1176,16 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
             </span>
           </button>
         </div>
-        <button onClick={() => setOwnerGate(true)} className="w-full text-center text-xs pt-1" style={{ color: "#8A6A2E" }}>
-          Espace gérant — créer un commerce
-        </button>
-        {onDemo && (
-          <div className="flex justify-center">
-            <button
-              onClick={onDemo}
-              aria-label="Essayer la démo"
-              title="Démo"
-              className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E66" }}
-            >
-              <Sparkles size={18} />
+        <div className="flex items-center justify-center gap-3 pt-3" style={{ borderTop: "1px solid #DCD5C6" }}>
+          <button onClick={() => setOwnerGate(true)} className="text-xs px-3 py-2 rounded-full" style={{ color: "#8A6A2E", border: "1px solid #C08A3E55" }}>
+            Espace gérant
+          </button>
+          {onDemo && (
+            <button onClick={onDemo} aria-label="Essayer la démo" title="Démo" className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E66" }}>
+              <Sparkles size={16} />
             </button>
-          </div>
-        )}
-        <div className="flex justify-center pt-2">
-          <button
-            onClick={() => setDevPanel(true)}
-            aria-label="Espace développeur"
-            className="flex items-center justify-center rounded-full"
-            style={{ width: 34, height: 34, background: "#1B1F1C" }}
-          >
+          )}
+          <button onClick={() => setDevPanel(true)} aria-label="Espace développeur" className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#1B1F1C" }}>
             <Lock size={14} color="#F0ECE3" />
           </button>
         </div>
