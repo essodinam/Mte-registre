@@ -3,6 +3,7 @@
 //   catalog → { items:[{id,name,price}], deliveryFee }
 //   order   → { items:[{id,qty}], customer:{name,phone,address,mode} } → { url, ref, total }
 //   status  → { ref } → { paid }
+import { verifyCaptcha, CAPTCHA_ERROR } from "./_recaptcha.js";
 import crypto from "node:crypto";
 import { cfg, db, saspay, settle } from "./_saspay.js";
 import { CATALOG, DELIVERY_FEE, SHOP_ID } from "./_mte-catalog.js";
@@ -43,6 +44,7 @@ export default async function handler(req, res) {
 
   try {
     if (body.action === "order") {
+      if (!(await verifyCaptcha(body.captcha, "order")).ok) return res.status(403).json({ error: CAPTCHA_ERROR });
       const lines = [];
       for (const it of Array.isArray(body.items) ? body.items.slice(0, 20) : []) {
         const p = CATALOG.find((x) => x.id === it.id);

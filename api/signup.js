@@ -6,6 +6,7 @@
 // Le commerce n'est créé qu'APRÈS un paiement réellement confirmé par SasPay (voir _saspay.js : activateSignup).
 import crypto from "node:crypto";
 import { cfg, db, saspay, settle, REGISTRY_KEY, telegram } from "./_saspay.js";
+import { verifyCaptcha, CAPTCHA_ERROR } from "./_recaptcha.js";
 
 const OPTIONS = [1, 3, 6, 12];
 const TYPES = ["quincaillerie", "bar", "boutique", "menuiserie"];
@@ -40,6 +41,7 @@ export default async function handler(req, res) {
   try {
     if (body.action === "start") {
       if (body.website) return res.status(400).json({ error: "Demande invalide." }); // champ piège pour les robots
+      if (!(await verifyCaptcha(body.captcha, "signup")).ok) return res.status(403).json({ error: CAPTCHA_ERROR });
       const p = body.profile || {};
       const months = Math.floor(Number(body.months));
       if (!OPTIONS.includes(months)) return res.status(400).json({ error: "Durée d'abonnement invalide." });

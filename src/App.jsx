@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.29";
+const APP_VERSION = "3.9.30";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "KABATEC Consulting";
 const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
@@ -989,6 +989,23 @@ function DevPanel({ onOpenShop, onClose }) {
   );
 }
 
+/* ---------- reCAPTCHA v3 (clé du site, publique) ---------- */
+const RECAPTCHA_SITE_KEY = "6LdfsS4uAAAAAH4edntog8au-BTGOoFrscOfbU1W";
+async function getCaptcha(action) {
+  try {
+    if (!window.grecaptcha) {
+      await new Promise((ok, ko) => {
+        const s = document.createElement("script");
+        s.src = `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
+        s.async = true; s.onload = ok; s.onerror = ko;
+        document.head.appendChild(s);
+      });
+    }
+    await new Promise((ok) => window.grecaptcha.ready(ok));
+    return await window.grecaptcha.execute(RECAPTCHA_SITE_KEY, { action });
+  } catch (e) { return ""; }
+}
+
 /* ---------- Inscription en ligne : profil du commerçant + paiement de l'abonnement (SasPay) ---------- */
 function SignupForm({ onBack, businessType }) {
   const [f, setF] = useState({ firstName: "", lastName: "", age: "", phone: "", email: "", city: "", businessName: "", months: 1, consent: false, website: "" });
@@ -1014,7 +1031,8 @@ function SignupForm({ onBack, businessType }) {
     if (!f.consent) return setErr("Coche la case pour accepter l'enregistrement de tes informations.");
     setBusy(true);
     try {
-      const j = await call({ action: "start", months: f.months, consent: true, website: f.website, profile: { businessType, firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
+      const captcha = await getCaptcha("signup");
+      const j = await call({ action: "start", captcha, months: f.months, consent: true, website: f.website, profile: { businessType, firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
       try { localStorage.setItem("kabatec-signupref", j.ref); } catch (e) {}
       window.location.href = j.url;
     } catch (e) { setErr(e.message || "Inscription impossible pour le moment."); setBusy(false); }
