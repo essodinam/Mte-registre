@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.33";
+const APP_VERSION = "3.9.34";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "MTE Registre";
 const WELCOME_LETTER = "M"; // lettre du logo sur l'écran d'accueil
@@ -1008,7 +1008,7 @@ async function getCaptcha(action) {
 
 /* ---------- Inscription en ligne : profil du commerçant + paiement de l'abonnement (SasPay) ---------- */
 function SignupForm({ onBack, businessType }) {
-  const [f, setF] = useState({ firstName: "", lastName: "", age: "", phone: "", email: "", city: "", businessName: "", months: 1, consent: false, website: "" });
+  const [f, setF] = useState({ firstName: "", lastName: "", age: "", phone: "", email: "", city: "", businessName: "", country: "TG", months: 1, consent: false, website: "" });
   const [plans, setPlans] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -1033,7 +1033,7 @@ function SignupForm({ onBack, businessType }) {
     setBusy(true);
     try {
       const captcha = await getCaptcha("signup");
-      const j = await call({ action: "start", captcha, months: f.months, consent: true, website: f.website, profile: { businessType, firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
+      const j = await call({ action: "start", captcha, months: f.months, consent: true, website: f.website, profile: { businessType, country: f.country, firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
       try { localStorage.setItem("kabatec-signupref", j.ref); } catch (e) {}
       window.location.href = j.url;
     } catch (e) { setErr(e.message || "Inscription impossible pour le moment."); setBusy(false); }
@@ -1061,7 +1061,13 @@ function SignupForm({ onBack, businessType }) {
         <label className="block">{lab("E-mail (facultatif)")}<input value={f.email} onChange={set("email")} type="email" autoComplete="email" maxLength={80} className={inp} style={st} /></label>
         <div className="grid grid-cols-2 gap-2">
           <label>{lab("Ville")}<input value={f.city} onChange={set("city")} maxLength={60} className={inp} style={st} /></label>
-          <label>{lab("Pays")}<input value="Togo" disabled className={inp} style={{ ...st, opacity: 0.6 }} /></label>
+          <label>{lab("Pays")}
+            <select value={f.country} onChange={set("country")} className={inp} style={st}>
+              {(plans?.countries || [{ code: "TG", name: "Togo", available: true }]).map((c) => (
+                <option key={c.code} value={c.code} disabled={!c.available}>{c.name}{c.available ? "" : " (bientôt)"}</option>
+              ))}
+            </select>
+          </label>
         </div>
         <label className="block">{lab("Nom de ton commerce *")}<input value={f.businessName} onChange={set("businessName")} maxLength={60} className={inp} style={st} /></label>
         <input value={f.website} onChange={set("website")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />

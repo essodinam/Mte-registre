@@ -7,6 +7,15 @@
 import crypto from "node:crypto";
 import { cfg, db, saspay, settle, REGISTRY_KEY, telegram } from "./_saspay.js";
 import { verifyCaptcha, CAPTCHA_ERROR } from "./_recaptcha.js";
+import { geniusEnabled, geniusCreate } from "./_geniuspay.js";
+
+// Pays acceptés et passerelle de paiement utilisée pour chacun.
+const COUNTRIES = {
+  TG: { name: "Togo", provider: "saspay" },
+  CI: { name: "Côte d'Ivoire", provider: "geniuspay" },
+  SN: { name: "Sénégal", provider: "geniuspay" },
+  BJ: { name: "Bénin", provider: "geniuspay" },
+};
 
 const OPTIONS = [1, 3, 6, 12];
 const TYPES = ["quincaillerie", "bar", "boutique", "menuiserie"];
@@ -30,8 +39,10 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Méthode non autorisée" });
   const body = typeof req.body === "string" ? (() => { try { return JSON.parse(req.body); } catch (e) { return {}; } })() : req.body || {};
   const c = cfg();
-  const enabled = !!(c.sk && c.whSecret && c.email && c.price && c.URL_ && c.KEY);
-  if (body.action === "plans") return res.status(200).json({ enabled, price: enabled ? c.price : 0, options: OPTIONS });
+  const base = !!(c.price && c.URL_ && c.KEY);
+  const avail = { saspay: base && !!(c.sk && c.whSecret && c.email), geniuspay: base && geniusEnabled() };
+  const enabled = avail.saspay || avail.geniuspay;
+  if (body.action === "plans") return res.status(200).json({ enabled, price: enabled ? c.price : 0, options: OPTIONS, countries: Object.entries(COUNTRIES).map(([code, v]) => ({ code, name: v.name, available: !!avail[v.provider] })) });
   if (!enabled) return res.status(503).json({ error: "L'inscription en ligne n'est pas disponible pour le moment." });
 
   const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "?").split(",")[0].trim();
@@ -52,6 +63,8 @@ export default async function handler(req, res) {
       const city = clean(p.city, 60);
       const business = clean(p.businessName, 60);
       const btype = TYPES.includes(p.businessType) ? p.businessType : null;
+      const country = COUNTRIES[p.country] ? p.country : "TG";
+      if (!avail[COUNTRIES[country].provider]) return res.status(503).json({ error: `L'inscription n'est pas encore disponible pour ${COUNTRIES[country].name}.` });
       if (first.length < 2 || last.length < 2) return res.status(400).json({ error: "Indique ton prénom et ton nom." });
       if (!(age >= 18 && age <= 120)) return res.status(400).json({ error: "L'inscription est réservée aux personnes de 18 ans et plus." });
       if (!/^\+?\d{8,15}$/.test(phone)) return res.status(400).json({ error: "Numéro de téléphone invalide." });
@@ -72,20 +85,33 @@ export default async function handler(req, res) {
 
       const amount = c.price * months;
       const ref = crypto.randomBytes(16).toString("hex");
-      const session = await saspay(c, "/checkout-sessions/", {
-        method: "POST",
-        body: JSON.stringify({
-          amount: amount.toFixed(2), currency: "XOF",
-          description: `Inscription MTE Registre — ${months} mois — ${business}`,
-          customer_email: email || c.email, customer_name: `${first} ${last}`, country: "TG",
-          return_url: `${c.appUrl}/?signup=${ref}`,
+      const description = `Inscription MTE Registre — ${months} mois — ${business}`;
+      let payUrl = "", sessionId = "";
+      if (COUNTRIES[country].provider === "geniuspay") {
+        const g = await geniusCreate({
+          amount, description,
+          customer: { name: `${first} ${last}`, email: email || undefined, phone, country },
+          successUrl: `${c.appUrl}/?signup=${ref}`, errorUrl: `${c.appUrl}/?signup=${ref}`,
           metadata: { shopId: code, ref, purpose: "signup" },
-        }),
-      });
-      if (!session.ok || !session.data?.checkout_url || !session.data?.id) return res.status(502).json({ error: "Le paiement n'a pas pu être créé. Réessaie plus tard." });
-      await must(await rest("user_profiles", { method: "POST", body: JSON.stringify({ shop_id: code, ref, first_name: first, last_name: last, age, phone, email: email || null, city: city || null, business_name: business, months }) }));
-      await must(await rest("saspay_pending", { method: "POST", body: JSON.stringify({ ref, session_id: String(session.data.id), shop_id: code, months, amount, currency: "XOF", kind: "signup", label: (btype ? `bt:${btype}|` : "") + `Inscription ${business}`.slice(0, 100) }) }));
-      return res.status(200).json({ url: session.data.checkout_url, ref });
+        });
+        if (!g.ok) return res.status(502).json({ error: "Le paiement n'a pas pu être créé. Réessaie plus tard." });
+        payUrl = g.url; sessionId = g.sessionId;
+      } else {
+        const session = await saspay(c, "/checkout-sessions/", {
+          method: "POST",
+          body: JSON.stringify({
+            amount: amount.toFixed(2), currency: "XOF", description,
+            customer_email: email || c.email, customer_name: `${first} ${last}`, country: "TG",
+            return_url: `${c.appUrl}/?signup=${ref}`,
+            metadata: { shopId: code, ref, purpose: "signup" },
+          }),
+        });
+        if (!session.ok || !session.data?.checkout_url || !session.data?.id) return res.status(502).json({ error: "Le paiement n'a pas pu être créé. Réessaie plus tard." });
+        payUrl = session.data.checkout_url; sessionId = String(session.data.id);
+      }
+      await must(await rest("user_profiles", { method: "POST", body: JSON.stringify({ shop_id: code, ref, first_name: first, last_name: last, age, phone, email: email || null, city: city || null, country: COUNTRIES[country].name, business_name: business, months }) }));
+      await must(await rest("saspay_pending", { method: "POST", body: JSON.stringify({ ref, session_id: sessionId, shop_id: code, months, amount, currency: "XOF", kind: "signup", label: (btype ? `bt:${btype}|` : "") + `Inscription ${business}`.slice(0, 100) }) }));
+      return res.status(200).json({ url: payUrl, ref });
     }
 
     if (body.action === "status") {

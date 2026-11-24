@@ -11,6 +11,8 @@
 //   APP_URL                  (facultatif) https://mte-registre.vercel.app
 //   SUPABASE_SERVICE_KEY, VITE_SUPABASE_URL ou SUPABASE_URL (déjà en place)
 
+import { geniusCheck, isGenius } from "./_geniuspay.js";
+
 export const REGISTRY_KEY = "shops_registry";
 export const validCode = (c) => /^[A-Za-z0-9-]{1,64}$/.test(c || "");
 const SASPAY_BASE = "https://api.saspay.me/api/v1";
@@ -68,15 +70,20 @@ export async function extendSubscription(c, shopId, months) {
 // Retourne { paid, until? }.
 export async function settle(c, pending) {
   if (pending.applied_at) return { paid: true };
-  const st = await saspay(c, `/checkout-sessions/${encodeURIComponent(pending.session_id)}/status/`);
-  if (!st.ok || !st.data) return { paid: false };
-  const ok = String(st.data.transaction_status || "").toUpperCase() === "SUCCESS" && String(st.data.status || "").toUpperCase() === "PAID";
-  if (!ok) return { paid: false, status: st.data.status || null };
-  // Contrôle du montant et de la devise réellement payés.
-  const det = await saspay(c, `/checkout-sessions/${encodeURIComponent(pending.session_id)}/`);
-  if (!det.ok || !det.data) return { paid: false };
-  if (Number(det.data.amount) !== Number(pending.amount) || String(det.data.currency || "").toUpperCase() !== String(pending.currency).toUpperCase()) {
-    return { paid: false, status: "montant_different" };
+  if (isGenius(pending)) {
+    const g = await geniusCheck(pending);
+    if (!g.paid) return g;
+  } else {
+    const st = await saspay(c, `/checkout-sessions/${encodeURIComponent(pending.session_id)}/status/`);
+    if (!st.ok || !st.data) return { paid: false };
+    const ok = String(st.data.transaction_status || "").toUpperCase() === "SUCCESS" && String(st.data.status || "").toUpperCase() === "PAID";
+    if (!ok) return { paid: false, status: st.data.status || null };
+    // Contrôle du montant et de la devise réellement payés.
+    const det = await saspay(c, `/checkout-sessions/${encodeURIComponent(pending.session_id)}/`);
+    if (!det.ok || !det.data) return { paid: false };
+    if (Number(det.data.amount) !== Number(pending.amount) || String(det.data.currency || "").toUpperCase() !== String(pending.currency).toUpperCase()) {
+      return { paid: false, status: "montant_different" };
+    }
   }
   // « Réservation » atomique : un seul appel peut marquer la ligne, donc un seul peut prolonger.
   const { rest, must } = db(c);
