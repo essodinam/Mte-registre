@@ -1,4 +1,4 @@
-// KABATEC Consulting — réception des confirmations SasPay (webhook).
+// MTE Registre — réception des confirmations SasPay (webhook).
 // SasPay appelle cette adresse après chaque paiement. On vérifie la signature,
 // puis on re-vérifie CHAQUE paiement en attente directement chez SasPay : le contenu
 // du message n'est jamais cru tel quel.

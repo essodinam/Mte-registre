@@ -1,4 +1,4 @@
-// KABATEC Consulting — paiement en ligne de l'abonnement (SasPay).
+// MTE Registre — paiement en ligne de l'abonnement (SasPay).
 // Actions (POST JSON) :
 //   info   → { enabled, price, months }                  (le bouton ne s'affiche que si enabled)
 //   create → { shopId }  → { url, ref }                  (crée la page de paiement SasPay)

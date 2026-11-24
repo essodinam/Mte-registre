@@ -1,4 +1,4 @@
-// KABATEC Consulting — outils communs pour les paiements SasPay (abonnement).
+// MTE Registre — outils communs pour les paiements SasPay (abonnement).
 // Ce fichier (préfixe « _ ») n'est PAS une adresse publique : il est seulement importé.
 //
 // Variables d'environnement (Vercel → Settings → Environment Variables) :
@@ -102,11 +102,11 @@ export async function telegram(text) {
 }
 
 // Envoie le code du commerce par e-mail au commerçant (service Resend). Sans RESEND_API_KEY, ne fait rien.
-//   RESEND_API_KEY  clé Resend ; RESEND_FROM  expéditeur, ex. « KABATEC <contact@ton-domaine.com> » (domaine vérifié chez Resend)
+//   RESEND_API_KEY  clé Resend ; RESEND_FROM  expéditeur, ex. « MTE Registre <contact@ton-domaine.com> » (domaine vérifié chez Resend)
 async function emailCode(to, first, code, months) {
   const KEY = process.env.RESEND_API_KEY;
   if (!KEY || !to) return;
-  const from = process.env.RESEND_FROM || "KABATEC Consulting <onboarding@resend.dev>";
+  const from = process.env.RESEND_FROM || "MTE Registre <onboarding@resend.dev>";
   const app = (process.env.APP_URL || "https://mte-registre.vercel.app").replace(/\/$/, "");
   const esc = (x) => String(x).replace(/[<>&"]/g, "");
   try {
@@ -114,8 +114,8 @@ async function emailCode(to, first, code, months) {
       method: "POST",
       headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from, to: [to], subject: "Ton commerce KABATEC est créé — voici ton code",
-        html: `<div style="font-family:Arial,sans-serif;max-width:480px"><h2>Bienvenue ${esc(first)} !</h2><p>Ton paiement est confirmé : ton abonnement de ${months} mois est actif.</p><p>Ton code de commerce :</p><p style="font-size:26px;letter-spacing:4px;font-weight:bold;background:#F0ECE3;padding:12px;text-align:center">${esc(code)}</p><p>Garde-le précieusement : il sert à connecter tes autres appareils et tes employés.</p><p><a href="${app}">Ouvrir l'application</a></p><p style="color:#777;font-size:12px">KABATEC Consulting</p></div>`,
+        from, to: [to], subject: "Ton commerce MTE Registre est créé — voici ton code",
+        html: `<div style="font-family:Arial,sans-serif;max-width:480px"><h2>Bienvenue ${esc(first)} !</h2><p>Ton paiement est confirmé : ton abonnement de ${months} mois est actif.</p><p>Ton code de commerce :</p><p style="font-size:26px;letter-spacing:4px;font-weight:bold;background:#F0ECE3;padding:12px;text-align:center">${esc(code)}</p><p>Garde-le précieusement : il sert à connecter tes autres appareils et tes employés.</p><p><a href="${app}">Ouvrir l'application</a></p><p style="color:#777;font-size:12px">MTE Registre</p></div>`,
       }),
     });
   } catch (e) { /* un e-mail raté ne doit rien bloquer */ }

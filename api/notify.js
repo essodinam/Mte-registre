@@ -1,4 +1,4 @@
-// KABATEC Consulting — alertes de service envoyées sur Telegram au gérant.
+// MTE Registre — alertes de service envoyées sur Telegram au gérant.
 // Variables Vercel : TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (déjà utilisées par le rapport quotidien)
 // et ALERT_SHOPS = codes des commerces autorisés à envoyer des alertes, séparés par des virgules.
 // Sans ALERT_SHOPS, aucune alerte n'est envoyée (les alertes arrivent sur TON Telegram :

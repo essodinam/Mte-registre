@@ -1,4 +1,4 @@
-// KABATEC Consulting — inscription en ligne d'un nouveau commerçant (profil + abonnement payé par SasPay).
+// MTE Registre — inscription en ligne d'un nouveau commerçant (profil + abonnement payé par SasPay).
 // Actions (POST JSON) :
 //   plans  → { enabled, price, options:[mois…] }
 //   start  → { profile, months } → { url, ref }   (enregistre le profil « en attente » et crée le paiement)
@@ -76,7 +76,7 @@ export default async function handler(req, res) {
         method: "POST",
         body: JSON.stringify({
           amount: amount.toFixed(2), currency: "XOF",
-          description: `Inscription KABATEC — ${months} mois — ${business}`,
+          description: `Inscription MTE Registre — ${months} mois — ${business}`,
           customer_email: email || c.email, customer_name: `${first} ${last}`, country: "TG",
           return_url: `${c.appUrl}/?signup=${ref}`,
           metadata: { shopId: code, ref, purpose: "signup" },

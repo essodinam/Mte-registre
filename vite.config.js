@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icons/apple-touch-icon.png"],
       manifest: {
-        name: "KABATEC Consulting",
-        short_name: "KABATEC",
+        name: "MTE Registre",
+        short_name: "MTE Registre",
         description: "Gestion de stock, ventes, paie et prise de service — Moïse Tech Énergie",
         start_url: "/",
         display: "standalone",

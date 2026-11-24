@@ -46,10 +46,10 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.31";
+const APP_VERSION = "3.9.32";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
-const WELCOME_TITLE = "KABATEC Consulting";
-const WELCOME_LETTER = "K"; // lettre du logo sur l'écran d'accueil
+const WELCOME_TITLE = "MTE Registre";
+const WELCOME_LETTER = "M"; // lettre du logo sur l'écran d'accueil
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -147,7 +147,7 @@ async function registerBiometric(userKey, userName) {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge,
-      rp: { name: "KABATEC Consulting" },
+      rp: { name: "MTE Registre" },
       user: { id: userId, name: userKey, displayName: userName || userKey },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
@@ -180,7 +180,7 @@ async function adminBioRegister(role, auth) {
   const cred = await navigator.credentials.create({
     publicKey: {
       challenge: b64uBytes(pack.challenge),
-      rp: { name: "KABATEC Consulting", id: window.location.hostname },
+      rp: { name: "MTE Registre", id: window.location.hostname },
       user: { id: crypto.getRandomValues(new Uint8Array(16)), name: `wuri-${role}`, displayName: role === "dev" ? "Développeur" : "Propriétaire" },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
@@ -285,9 +285,9 @@ function Logo({ size = 40, letter = WELCOME_LETTER }) {
   );
 }
 
-/* ---------- Logo horizontal KABATEC Consulting (pictogramme + nom + signature) ---------- */
+/* ---------- Logo horizontal MTE Registre (pictogramme + nom + signature) ---------- */
 function BrandLogo({ width = 320 }) {
-  return <img src="/kabatec-logo.png" alt="KABATEC Consulting" width={width} style={{ maxWidth: "100%", height: "auto", borderRadius: 22, boxShadow: "0 2px 10px #1B1F1C1F" }} />;
+  return <img src="/mte-registre-logo.png" alt="MTE Registre" width={width} style={{ maxWidth: "100%", height: "auto", borderRadius: 22, boxShadow: "0 2px 10px #1B1F1C1F" }} />;
 }
 
 /* ---------- Synchronisation résiliente (file d'attente hors-ligne) ---------- */
@@ -1076,7 +1076,7 @@ function SignupForm({ onBack, businessType }) {
         </div>
         <label className="flex items-start gap-2 text-xs" style={{ color: "#6B6558" }}>
           <input type="checkbox" checked={f.consent} onChange={(e) => setF((x) => ({ ...x, consent: e.target.checked }))} className="mt-0.5" />
-          <span>J'ai 18 ans ou plus et j'accepte que KABATEC Consulting enregistre ces informations pour créer et gérer mon compte.</span>
+          <span>J'ai 18 ans ou plus et j'accepte que MTE Registre enregistre ces informations pour créer et gérer mon compte.</span>
         </label>
         {err && <p className="text-xs text-center" style={{ color: "#DC4C3C" }}>{err}</p>}
         <button disabled={busy || !plans?.enabled} onClick={submit} className="w-full py-3 rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
@@ -1128,7 +1128,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={56} />
-            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">KABATEC Consulting</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">MTE Registre</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Code de ton commerce</p>
           </div>
           <input
@@ -1243,8 +1243,8 @@ function ShopCodeReveal({ code, onContinue }) {
           {code}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <a href={`https://wa.me/?text=${encodeURIComponent(`Mon code de commerce KABATEC : ${code}`)}`} target="_blank" rel="noreferrer" className="py-2 rounded-lg text-xs font-medium" style={{ background: "#16A34A1A", color: "#16A34A", border: "1px solid #16A34A55" }}>Envoyer par WhatsApp</a>
-          <a href={`mailto:?subject=${encodeURIComponent("Mon code de commerce KABATEC")}&body=${encodeURIComponent(`Mon code de commerce : ${code}`)}`} className="py-2 rounded-lg text-xs font-medium" style={{ background: "#FFFFFF", color: "#1B1F1C", border: "1px solid #DCD5C6" }}>Envoyer par e-mail</a>
+          <a href={`https://wa.me/?text=${encodeURIComponent(`Mon code de commerce MTE Registre : ${code}`)}`} target="_blank" rel="noreferrer" className="py-2 rounded-lg text-xs font-medium" style={{ background: "#16A34A1A", color: "#16A34A", border: "1px solid #16A34A55" }}>Envoyer par WhatsApp</a>
+          <a href={`mailto:?subject=${encodeURIComponent("Mon code de commerce MTE Registre")}&body=${encodeURIComponent(`Mon code de commerce : ${code}`)}`} className="py-2 rounded-lg text-xs font-medium" style={{ background: "#FFFFFF", color: "#1B1F1C", border: "1px solid #DCD5C6" }}>Envoyer par e-mail</a>
         </div>
         <p className="text-[10px]" style={{ color: "#8A6A2E" }}>Tu pourras le retrouver plus tard dans Réglages.</p>
         <button onClick={onContinue} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
@@ -1266,7 +1266,7 @@ function LoginScreen({ sellers, cashiers, onPickGerant, onPickVendeur, onPickCai
         )}
         <div className="text-center">
           <Logo size={56} />
-          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">KABATEC Consulting</h1>
+          <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">MTE Registre</h1>
           <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Qui utilise l'application ?</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -2102,7 +2102,7 @@ function ChantiersTab({ jobs, setJobs, isAdmin, shopName }) {
     setDepositFor(null);
   };
   const remind = (j) => {
-    const msg = `Bonjour ${j.client || ""}, concernant « ${j.title} » chez ${shopName || "KABATEC Consulting"} : total ${fmt(j.total)} FCFA, déjà réglé ${fmt(jobPaid(j))} FCFA, reste à payer ${fmt(jobLeft(j))} FCFA. Merci !`;
+    const msg = `Bonjour ${j.client || ""}, concernant « ${j.title} » chez ${shopName || "MTE Registre"} : total ${fmt(j.total)} FCFA, déjà réglé ${fmt(jobPaid(j))} FCFA, reste à payer ${fmt(jobLeft(j))} FCFA. Merci !`;
     window.open(`https://wa.me/${j.phone ? waPhone(j.phone) : ""}?text=${encodeURIComponent(msg)}`, "_blank");
   };
   const input = "w-full mt-1 px-3 py-2 rounded-md text-sm outline-none";
@@ -2483,7 +2483,7 @@ function VenteTab({ categories, products, cart, setCart, onValidate, clients, on
   const startLinkPayment = async () => {
     setPayingOnline(true);
     try {
-      const r = await fetch("/api/saspay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "createSale", shopId, amount: total, label: `Vente — ${shopName || "KABATEC Consulting"}` }) });
+      const r = await fetch("/api/saspay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "createSale", shopId, amount: total, label: `Vente — ${shopName || "MTE Registre"}` }) });
       const d = await r.json();
       if (!r.ok || !d.url) throw new Error(d.error || "erreur");
       setLinkMsg("");
@@ -3325,7 +3325,7 @@ function PayslipModal({ data, year, month, onClose }) {
         </div>
 
         <p className="text-[10px]" style={{ color: "#16A34A" }}>
-          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans KABATEC Consulting pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
+          Calcul basé sur les ventes et les heures de service (Agenda) enregistrées dans MTE Registre pour la période sélectionnée — document indicatif à intégrer dans ta comptabilité.
         </p>
 
         <button onClick={() => window.print()} className="w-full py-2.5 rounded-lg text-sm font-medium" style={{ background: "#DCD5C6", color: "#1B1F1C" }}>
@@ -4475,7 +4475,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
                     const text = low.length === 0
                       ? `Stock de ${shopName || "mon commerce"} : aucun article en stock bas pour l'instant.`
                       : `⚠️ Stock bas — ${shopName || "mon commerce"}\n\n${low.map((p) => `• ${p.name} : ${p.stock} ${p.unit} restant(s)`).join("\n")}`;
-                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "KABATEC Consulting"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Alerte stock bas — ${shopName || "MTE Registre"}`)}&body=${encodeURIComponent(text)}`, "_blank");
                   }}
                   className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
                   style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#DC4C3C" }}
@@ -4488,7 +4488,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
                     const todaySales = sales.filter((s) => new Date(s.date) >= start);
                     const total = todaySales.reduce((s, v) => s + v.total, 0);
                     const text = `${todaySales.length} vente(s)\nTotal : ${fmt(total)} FCFA`;
-                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "KABATEC Consulting"}`)}&body=${encodeURIComponent(text)}`, "_blank");
+                    window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(`Rapport ${label} — ${shopName || "MTE Registre"}`)}&body=${encodeURIComponent(text)}`, "_blank");
                   }}
                   className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
                   style={{ background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#16A34A" }}
@@ -4512,7 +4512,7 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = `kabatec-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`;
+              a.download = `mte-registre-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`;
               a.click();
               URL.revokeObjectURL(url);
             }}
@@ -4640,7 +4640,7 @@ function InstallBanner() {
         <Package size={20} className="shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold leading-tight" style={{ fontFamily: "'Carlito', sans-serif" }}>
-            Installe KABATEC Consulting sur ton téléphone
+            Installe MTE Registre sur ton téléphone
           </p>
           <p className="text-[11px] leading-tight opacity-80">Accès plus rapide, fonctionne même hors connexion</p>
         </div>
@@ -4813,7 +4813,7 @@ function DailyReportModal({ sales, products, expenses, purchases, sellers, perio
                 topSeller ? `Meilleur vendeur : ${topSeller[0]} (${fmt(topSeller[1])} FCFA)` : null,
                 lowStock.length > 0 ? `⚠️ Stock bas : ${lowStock.map((p) => p.name).join(", ")}` : null,
               ].filter(Boolean).join("\n");
-              const subject = `Rapport ${label} — KABATEC Consulting`;
+              const subject = `Rapport ${label} — MTE Registre`;
               window.open(`mailto:${gerantEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines)}`, "_blank");
             }}
             className="w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
@@ -5819,7 +5819,7 @@ function AppInner() {
         <div className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <Logo size={60} />
-            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">KABATEC Consulting</h1>
+            <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-2xl">MTE Registre</h1>
             <p className="text-sm mt-1" style={{ color: "#6B6558" }}>Choisis ton type de commerce pour commencer</p>
           </div>
           <div className="space-y-2">
@@ -5975,7 +5975,7 @@ function AppInner() {
               <Logo size={34} />
             )}
             <div>
-              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">KABATEC Consulting</h1>
+              <h1 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-xl leading-tight">MTE Registre</h1>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <p className="text-xs" style={{ color: "#16A34A" }}>{BUSINESS_TYPES[businessType].icon} {currentUser.name}</p>
                 {isOpenNow !== null && (
@@ -6214,7 +6214,7 @@ function SplashScreen({ onDone }) {
         <Logo size={84} />
       </div>
       <p className="wuri-splash-text mt-5 text-lg" style={{ fontFamily: "'Carlito', sans-serif", color: "#F0ECE3" }}>
-        Bienvenue chez KABATEC Consulting
+        Bienvenue chez MTE Registre
       </p>
       <p className="wuri-splash-text mt-1 text-xs" style={{ color: "#8A6A2E" }}>
         Gestion de commerce, simplement

@@ -1,4 +1,4 @@
-// KABATEC Consulting — rapport quotidien envoyé sur Telegram (tâche planifiée Vercel).
+// MTE Registre — rapport quotidien envoyé sur Telegram (tâche planifiée Vercel).
 // Aucun secret dans ce fichier : tout vient des variables d'environnement Vercel
 // (SUPABASE_SERVICE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, VITE_SUPABASE_URL).
 export default async function handler(req, res) {
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       if (sales.length) { grand += sum; lines.push(`• Commerce ${shop} : ${n} vente(s), ${sum.toLocaleString("fr-FR")} FCFA`); }
     }
 
-    let msg = `📒 *KABATEC Consulting — Rapport du ${now.toLocaleDateString("fr-FR")}*\n\n`;
+    let msg = `📒 *MTE Registre — Rapport du ${now.toLocaleDateString("fr-FR")}*\n\n`;
     msg += lines.length ? `${lines.join("\n")}\n\n💰 Total général du jour : *${grand.toLocaleString("fr-FR")} FCFA*` : "Aucune vente enregistrée aujourd'hui.";
     if (daysSince !== null && daysSince >= INACTIVITY_DAYS) msg += `\n\n⚠️ *Alerte inactivité* : aucune activité depuis ${Math.floor(daysSince)} jour(s). Le projet risque de se mettre en pause.`;
     else if (lastActivity === null) msg += `\n\n⚠️ Aucune activité n'a encore été enregistrée sur la base.`;
