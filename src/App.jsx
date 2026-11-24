@@ -46,7 +46,7 @@ const DEMO_PREFIX = "DEMO-"; // commerces de démonstration : jamais dans le reg
    celle qu'il avait la dernière fois, il est automatiquement déconnecté et
    renvoyé à l'écran de connexion — il voit alors la nouvelle version.
 ------------------------------------------------------------------- */
-const APP_VERSION = "3.9.32";
+const APP_VERSION = "3.9.33";
 // Titre affiché sur l'écran d'accueil (pour afficher le nom d'un autre commerce, change seulement ce texte).
 const WELCOME_TITLE = "MTE Registre";
 const WELCOME_LETTER = "M"; // lettre du logo sur l'écran d'accueil
@@ -287,7 +287,7 @@ function Logo({ size = 40, letter = WELCOME_LETTER }) {
 
 /* ---------- Logo horizontal MTE Registre (pictogramme + nom + signature) ---------- */
 function BrandLogo({ width = 320 }) {
-  return <img src="/mte-registre-logo.png" alt="MTE Registre" width={width} style={{ maxWidth: "100%", height: "auto", borderRadius: 22, boxShadow: "0 2px 10px #1B1F1C1F" }} />;
+  return <img src="/mte-logo.png" alt="MTE Registre" width={width} style={{ maxWidth: "100%", height: "auto", borderRadius: 22, boxShadow: "0 2px 10px #1B1F1C1F" }} />;
 }
 
 /* ---------- Synchronisation résiliente (file d'attente hors-ligne) ---------- */
