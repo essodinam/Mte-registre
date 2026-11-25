@@ -2946,7 +2946,90 @@ function HistoriqueTab({ sales }) {
 }
 
 /* ---------- Tableau de bord (ventes & meilleurs articles) ---------- */
-function DashboardTab({ sales, products, goal, setGoal }) {
+/* ---------- Assistant IA du gérant ---------- */
+function AssistantCard({ shopId, shopName, sales, products }) {
+  const [q, setQ] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [quota, setQuota] = useState(null); // { enabled, used, limit }
+  const post = async (payload) => {
+    const r = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopId, ...payload }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(j.error || "Erreur"); e.data = j; throw e; }
+    return j;
+  };
+  useEffect(() => { if (shopId) post({ action: "quota" }).then(setQuota).catch(() => setQuota({ enabled: false })); }, [shopId]);
+
+  const buildContext = () => {
+    const day = (t) => new Date(t).toISOString().slice(0, 10);
+    const now = Date.now();
+    const since30 = now - 30 * 86400000;
+    const perDay = {};
+    const perProduct = {};
+    let total30 = 0, count30 = 0;
+    (sales || []).forEach((sl) => {
+      if (!sl || sl.date < since30) return;
+      total30 += sl.total || 0; count30 += 1;
+      perDay[day(sl.date)] = (perDay[day(sl.date)] || 0) + (sl.total || 0);
+      (sl.items || []).forEach((it) => {
+        const e = perProduct[it.name] || (perProduct[it.name] = { vendu: 0, chiffre: 0 });
+        e.vendu += it.qty || 0; e.chiffre += (it.price || 0) * (it.qty || 0);
+      });
+    });
+    const top = Object.entries(perProduct).sort((a, b) => b[1].chiffre - a[1].chiffre).slice(0, 15).map(([nom, v]) => ({ nom, ...v }));
+    const real = (products || []).filter((x) => !x.isService);
+    return {
+      commerce: shopName || shopId,
+      aujourdhui: day(now),
+      ventes_30_jours: { total: total30, nombre: count30, par_jour: perDay },
+      meilleurs_produits_30_jours: top,
+      produits_total: real.length,
+      stock_faible: real.filter((x) => x.stock <= x.threshold).slice(0, 30).map((x) => ({ nom: x.name, stock: x.stock, seuil: x.threshold })),
+      sans_vente_30_jours: real.filter((x) => !perProduct[x.name]).slice(0, 30).map((x) => ({ nom: x.name, stock: x.stock })),
+    };
+  };
+  const ask = async (text) => {
+    const question = (text ?? q).trim();
+    if (question.length < 3 || busy) return;
+    setBusy(true); setErr(""); setAnswer(""); setQ(question);
+    try {
+      const j = await post({ question, context: buildContext() });
+      setAnswer(j.answer); setQuota((x) => ({ ...(x || {}), enabled: true, used: j.used, limit: j.limit }));
+    } catch (e) { setErr(e.message || "Erreur"); }
+    setBusy(false);
+  };
+  if (quota && quota.enabled === false) {
+    return (
+      <div className="rounded-lg p-3 text-xs" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#6B6558" }}>
+        <div className="flex items-center gap-2 text-sm" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}><Sparkles size={15} style={{ color: "#C08A3E" }} /> Assistant IA</div>
+        <p className="mt-1">Bientôt disponible : pose des questions sur tes ventes et ton stock.</p>
+      </div>
+    );
+  }
+  const chips = ["Comment vont mes ventes ce mois ?", "Quels produits vont manquer ?", "Quels produits ne se vendent pas ?"];
+  return (
+    <div className="rounded-lg p-3 space-y-2" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}><Sparkles size={15} style={{ color: "#C08A3E" }} /> Assistant IA</div>
+        {quota && quota.limit ? <span className="text-xs" style={{ color: "#6B6558" }}>{quota.used}/{quota.limit} ce mois</span> : null}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map((c) => (
+          <button key={c} type="button" disabled={busy} onClick={() => ask(c)} className="text-xs px-3 min-h-[44px] rounded-full disabled:opacity-40" style={{ border: "1px solid #DCD5C6", color: "#1B1F1C", background: "#F0ECE3" }}>{c}</button>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") ask(); }} maxLength={500} placeholder="Pose ta question…" aria-label="Question pour l'assistant" className="flex-1 min-w-0 px-3 min-h-[44px] rounded-lg outline-none text-base" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+        <button type="button" onClick={() => ask()} disabled={busy || q.trim().length < 3} className="px-4 min-h-[44px] rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>{busy ? "…" : "Demander"}</button>
+      </div>
+      {err && <p role="alert" className="text-xs" style={{ color: "#B3321F" }}>{err}</p>}
+      {answer && <div className="text-sm whitespace-pre-wrap rounded-lg p-3" style={{ background: "#F0ECE3", color: "#1B1F1C" }}>{answer}</div>}
+    </div>
+  );
+}
+
+function DashboardTab({ sales, products, goal, setGoal, shopId, shopName }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const DAYS = 14;
 
@@ -3007,6 +3090,7 @@ function DashboardTab({ sales, products, goal, setGoal }) {
 
   return (
     <div className="space-y-5">
+      {shopId && <AssistantCard shopId={shopId} shopName={shopName} sales={sales} products={products} />}
       <div className="rounded-lg p-3 space-y-2" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
         <div className="flex items-center justify-between">
           <span className="text-[11px]" style={{ color: "#6B6558" }}>Objectif de ventes du mois</span>
@@ -6081,7 +6165,7 @@ function AppInner() {
             onDeleteExpense={(id) => setExpenses((prev) => prev.filter((e) => e.id !== id))}
           />
         )}
-        {tab === "dashboard" && isAdmin && <DashboardTab sales={sales} products={products} goal={salesGoal} setGoal={setSalesGoal} />}
+        {tab === "dashboard" && isAdmin && <DashboardTab sales={sales} products={products} goal={salesGoal} setGoal={setSalesGoal} shopId={shopId} shopName={shopName} />}
         {tab === "reglages" && (
           <ReglagesTab
             lockMinutes={lockMinutes}
