@@ -709,7 +709,7 @@ function CategoryShowcase({ onPick }) {
           >
             <img src={image} alt={label} className="w-[78%] h-[78%] object-contain" />
           </div>
-          <span className="mt-1.5 text-[10px] text-center leading-tight" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>
+          <span className="mt-1.5 text-xs text-center leading-tight" style={{ color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" }}>
             {label}
           </span>
         </button>
@@ -1012,6 +1012,8 @@ function SignupForm({ onBack, businessType }) {
   const [plans, setPlans] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [errField, setErrField] = useState(null);
+  const fail = (field, msg) => { setErr(msg); setErrField(field); setTimeout(() => { try { document.getElementById("su-" + field)?.focus(); } catch (e) {} }, 0); };
   const call = async (payload) => {
     const r = await fetch("/api/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const j = await r.json().catch(() => ({}));
@@ -1023,24 +1025,27 @@ function SignupForm({ onBack, businessType }) {
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const total = plans?.price ? plans.price * f.months : 0;
   const submit = async () => {
-    setErr("");
+    setErr(""); setErrField(null);
     const age = Number(f.age);
-    if (!f.firstName.trim() || !f.lastName.trim()) return setErr("Indique ton prénom et ton nom.");
-    if (!(age >= 18)) return setErr("L'inscription est réservée aux personnes de 18 ans et plus.");
-    if (!/^\+?[\d\s]{8,18}$/.test(f.phone.trim())) return setErr("Numéro de téléphone invalide.");
-    if (!f.businessName.trim()) return setErr("Indique le nom de ton commerce.");
-    if (!f.consent) return setErr("Coche la case pour accepter l'enregistrement de tes informations.");
+    if (!f.firstName.trim()) return fail("firstName", "Indique ton prénom.");
+    if (!f.lastName.trim()) return fail("lastName", "Indique ton nom.");
+    if (!(age >= 18)) return fail("age", "Réservé aux 18 ans et plus.");
+    if (!/^\+?\d{8,15}$/.test(f.phone.replace(/[^\d+]/g, ""))) return fail("phone", "Numéro invalide (8 à 15 chiffres).");
+    if (!f.businessName.trim()) return fail("businessName", "Indique le nom de ton commerce.");
+    if (!f.consent) return fail("consent", "Coche la case pour continuer.");
     setBusy(true);
     try {
       const captcha = await getCaptcha("signup");
       const j = await call({ action: "start", captcha, months: f.months, consent: true, website: f.website, profile: { businessType, country: f.country, firstName: f.firstName, lastName: f.lastName, age, phone: f.phone, email: f.email, city: f.city, businessName: f.businessName } });
       try { localStorage.setItem("kabatec-signupref", j.ref); } catch (e) {}
       window.location.href = j.url;
-    } catch (e) { setErr(e.message || "Inscription impossible pour le moment."); setBusy(false); }
+    } catch (e) { setErr(e.message || "Inscription impossible pour le moment."); setErrField(null); setBusy(false); }
   };
-  const inp = "w-full px-3 py-2.5 rounded-lg outline-none text-sm";
+  const inp = "w-full px-3 py-2.5 min-h-[44px] rounded-lg outline-none text-base";
   const st = { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" };
   const lab = (t) => <span className="text-xs block mb-1" style={{ color: "#6B6558" }}>{t}</span>;
+  const fe = (k) => errField === k && err ? <span role="alert" className="text-xs block mt-1" style={{ color: "#B3321F" }}>{err}</span> : null;
+  const bad = (k) => errField === k ? { borderColor: "#B3321F" } : null;
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "transparent" }}>
       <div className="w-full max-w-sm space-y-3">
@@ -1051,12 +1056,12 @@ function SignupForm({ onBack, businessType }) {
         </div>
         {plans && !plans.enabled && <p className="text-sm text-center p-3 rounded-lg" style={{ background: "#DC4C3C1A", color: "#DC4C3C" }}>L'inscription en ligne n'est pas disponible pour le moment.</p>}
         <div className="grid grid-cols-2 gap-2">
-          <label>{lab("Prénom *")}<input value={f.firstName} onChange={set("firstName")} autoComplete="given-name" maxLength={40} className={inp} style={st} /></label>
-          <label>{lab("Nom *")}<input value={f.lastName} onChange={set("lastName")} autoComplete="family-name" maxLength={40} className={inp} style={st} /></label>
+          <label>{lab("Prénom *")}<input value={f.firstName} onChange={set("firstName")} id="su-firstName" aria-invalid={errField === "firstName"} autoComplete="given-name" maxLength={40} className={inp} style={{ ...st, ...bad("firstName") }} />{fe("firstName")}</label>
+          <label>{lab("Nom *")}<input value={f.lastName} onChange={set("lastName")} id="su-lastName" aria-invalid={errField === "lastName"} autoComplete="family-name" maxLength={40} className={inp} style={{ ...st, ...bad("lastName") }} />{fe("lastName")}</label>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <label>{lab("Âge *")}<input value={f.age} onChange={set("age")} inputMode="numeric" maxLength={3} className={inp} style={st} /></label>
-          <label className="col-span-2">{lab("Téléphone *")}<input value={f.phone} onChange={set("phone")} inputMode="tel" autoComplete="tel" placeholder="+228 …" maxLength={20} className={inp} style={st} /></label>
+          <label>{lab("Âge *")}<input value={f.age} onChange={set("age")} id="su-age" aria-invalid={errField === "age"} inputMode="numeric" maxLength={3} className={inp} style={{ ...st, ...bad("age") }} />{fe("age")}</label>
+          <label className="col-span-2">{lab("Téléphone *")}<input value={f.phone} onChange={set("phone")} id="su-phone" aria-invalid={errField === "phone"} inputMode="tel" autoComplete="tel" placeholder="+228 …" maxLength={20} className={inp} style={{ ...st, ...bad("phone") }} />{fe("phone")}</label>
         </div>
         <label className="block">{lab("E-mail (facultatif)")}<input value={f.email} onChange={set("email")} type="email" autoComplete="email" maxLength={80} className={inp} style={st} /></label>
         <div className="grid grid-cols-2 gap-2">
@@ -1069,26 +1074,26 @@ function SignupForm({ onBack, businessType }) {
             </select>
           </label>
         </div>
-        <label className="block">{lab("Nom de ton commerce *")}<input value={f.businessName} onChange={set("businessName")} maxLength={60} className={inp} style={st} /></label>
+        <label className="block">{lab("Nom de ton commerce *")}<input value={f.businessName} onChange={set("businessName")} id="su-businessName" aria-invalid={errField === "businessName"} maxLength={60} className={inp} style={{ ...st, ...bad("businessName") }} />{fe("businessName")}</label>
         <input value={f.website} onChange={set("website")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
         <div>
           {lab("Durée de l'abonnement")}
           <div className="grid grid-cols-4 gap-1.5">
             {(plans?.options || [1, 3, 6, 12]).map((m) => (
-              <button key={m} type="button" onClick={() => setF((x) => ({ ...x, months: m }))} className="py-2 rounded-lg text-sm" style={f.months === m ? { background: "#1B1F1C", color: "#F0ECE3" } : { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>{m} mois</button>
+              <button key={m} type="button" onClick={() => setF((x) => ({ ...x, months: m }))} className="py-2 min-h-[44px] rounded-lg text-sm" style={f.months === m ? { background: "#1B1F1C", color: "#F0ECE3" } : { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>{m} mois</button>
             ))}
           </div>
           {total > 0 && <p className="text-sm text-center mt-2" style={{ color: "#1B1F1C" }}>À payer : <b>{total.toLocaleString("fr-FR")} FCFA</b></p>}
         </div>
-        <label className="flex items-start gap-2 text-xs" style={{ color: "#6B6558" }}>
-          <input type="checkbox" checked={f.consent} onChange={(e) => setF((x) => ({ ...x, consent: e.target.checked }))} className="mt-0.5" />
-          <span>J'ai 18 ans ou plus et j'accepte que MTE Registre enregistre ces informations pour créer et gérer mon compte.</span>
+        <label className="flex items-start gap-3 text-xs py-1 min-h-[44px]" style={{ color: "#6B6558" }}>
+          <input id="su-consent" type="checkbox" checked={f.consent} onChange={(e) => setF((x) => ({ ...x, consent: e.target.checked }))} className="mt-0.5 w-5 h-5 shrink-0" />
+          <span>J'ai 18 ans ou plus et j'accepte que MTE Registre enregistre ces informations pour créer et gérer mon compte.{fe("consent")}</span>
         </label>
-        {err && <p className="text-xs text-center" style={{ color: "#DC4C3C" }}>{err}</p>}
-        <button disabled={busy || !plans?.enabled} onClick={submit} className="w-full py-3 rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
-          {busy ? "Redirection vers le paiement…" : "Payer et créer mon commerce"}
+        {err && !errField && <p role="alert" className="text-xs text-center" style={{ color: "#B3321F" }}>{err}</p>}
+        <button disabled={busy || !plans?.enabled} onClick={submit} className="w-full py-3 min-h-[48px] rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>
+          {busy ? "Redirection vers le paiement…" : !plans ? "Chargement…" : "Payer et créer mon commerce"}
         </button>
-        <button onClick={onBack} className="w-full text-xs" style={{ color: "#6B6558" }}>Retour</button>
+        <button onClick={onBack} className="w-full min-h-[44px] text-sm" style={{ color: "#6B6558" }}>Retour</button>
       </div>
     </div>
   );
@@ -1152,7 +1157,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
           >
             Rejoindre ce commerce
           </button>
-          <button onClick={() => setMode(null)} className="w-full text-xs" style={{ color: "#6B6558" }}>Retour</button>
+          <button onClick={() => setMode(null)} className="w-full min-h-[44px] text-sm" style={{ color: "#6B6558" }}>Retour</button>
         </div>
       </div>
     );
@@ -1202,15 +1207,15 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
           </button>
         </div>
         <div className="flex items-center justify-center gap-3 pt-3" style={{ borderTop: "1px solid #DCD5C6" }}>
-          <button onClick={() => setOwnerGate(true)} className="text-xs px-3 py-2 rounded-full" style={{ color: "#8A6A2E", border: "1px solid #C08A3E55" }}>
+          <button onClick={() => setOwnerGate(true)} className="text-xs px-4 min-h-[44px] rounded-full" style={{ color: "#7A5C22", border: "1px solid #C08A3E88" }}>
             Espace gérant
           </button>
           {onDemo && (
-            <button onClick={onDemo} aria-label="Essayer la démo" title="Démo" className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E66" }}>
+            <button onClick={onDemo} aria-label="Essayer la démo" title="Démo" className="w-11 h-11 rounded-full flex items-center justify-center" style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E66" }}>
               <Sparkles size={16} />
             </button>
           )}
-          <button onClick={() => setDevPanel(true)} aria-label="Espace développeur" className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "#1B1F1C" }}>
+          <button onClick={() => setDevPanel(true)} aria-label="Espace développeur" className="w-11 h-11 rounded-full flex items-center justify-center" style={{ background: "#1B1F1C" }}>
             <Lock size={14} color="#F0ECE3" />
           </button>
         </div>
@@ -1249,7 +1254,7 @@ function ShopCodeReveal({ code, onContinue }) {
           {code}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <a href={`https://wa.me/?text=${encodeURIComponent(`Mon code de commerce MTE Registre : ${code}`)}`} target="_blank" rel="noreferrer" className="py-2 rounded-lg text-xs font-medium" style={{ background: "#16A34A1A", color: "#16A34A", border: "1px solid #16A34A55" }}>Envoyer par WhatsApp</a>
+          <a href={`https://wa.me/?text=${encodeURIComponent(`Mon code de commerce MTE Registre : ${code}`)}`} target="_blank" rel="noreferrer" className="py-2 rounded-lg text-xs font-medium" style={{ background: "#16A34A1A", color: "#15803D", border: "1px solid #16A34A55" }}>Envoyer par WhatsApp</a>
           <a href={`mailto:?subject=${encodeURIComponent("Mon code de commerce MTE Registre")}&body=${encodeURIComponent(`Mon code de commerce : ${code}`)}`} className="py-2 rounded-lg text-xs font-medium" style={{ background: "#FFFFFF", color: "#1B1F1C", border: "1px solid #DCD5C6" }}>Envoyer par e-mail</a>
         </div>
         <p className="text-[10px]" style={{ color: "#8A6A2E" }}>Tu pourras le retrouver plus tard dans Réglages.</p>
