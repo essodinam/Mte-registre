@@ -4,4 +4,6 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    # 0 = aucune mise à jour de version automatique ; les correctifs de sécurité
+    # (Dependabot security updates) continuent d'être proposés séparément.
+    open-pull-requests-limit: 0
