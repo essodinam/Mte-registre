@@ -1,4 +1,14 @@
 {
   "crons": [{ "path": "/api/daily-report", "schedule": "0 20 * * *" }],
-  "rewrites": [{ "source": "/s/:slug", "destination": "/api/shop-page?slug=:slug" }]
+  "rewrites": [{ "source": "/s/:slug", "destination": "/api/shop-page?slug=:slug" }],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
 }
