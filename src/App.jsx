@@ -1205,6 +1205,9 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
               <span className="text-xs block mt-0.5" style={{ color: "#6B6558" }}>J'ai déjà un code</span>
             </span>
           </button>
+          <a href="https://whatsapp.com/channel/0029Vb9kmKsLdQekOjE8xo0Y" target="_blank" rel="noopener noreferrer" className="w-full min-h-[44px] rounded-lg flex items-center justify-center gap-2 text-sm" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#15803D" }}>
+            Suivre notre chaîne WhatsApp
+          </a>
         </div>
         <div className="flex items-center justify-center gap-3 pt-3" style={{ borderTop: "1px solid #DCD5C6" }}>
           <button onClick={() => setOwnerGate(true)} className="text-xs px-4 min-h-[44px] rounded-full" style={{ color: "#7A5C22", border: "1px solid #C08A3E88" }}>
