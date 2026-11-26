@@ -1,3 +1,4 @@
 {
-  "crons": [{ "path": "/api/daily-report", "schedule": "0 20 * * *" }]
+  "crons": [{ "path": "/api/daily-report", "schedule": "0 20 * * *" }],
+  "rewrites": [{ "source": "/s/:slug", "destination": "/api/shop-page?slug=:slug" }]
 }

@@ -3929,7 +3929,79 @@ function CategoryManager({ categories, products, onSave, onRename, title = "Cat�
   );
 }
 
-function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, shopChannel, setShopChannel, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+/* ---------- Page publique du commerce ---------- */
+const buildPublicSnapshot = ({ shopName, shopLogoUrl, shopChannel, publicPhone, hours, shopLocation, products }) => ({
+  name: shopName || "Mon commerce",
+  logo: shopLogoUrl || "",
+  channel: shopChannel || "",
+  phone: publicPhone || "",
+  hours: hours && hours.open && hours.close ? { open: hours.open, close: hours.close } : null,
+  location: shopLocation && shopLocation.lat != null ? { lat: shopLocation.lat, lng: shopLocation.lng } : null,
+  products: (products || []).map((p) => ({ name: p.name, category: p.category, price: p.price, photo: p.photoUrl || "", available: !!p.isService || Number(p.stock) > 0, unit: p.unit })),
+});
+const publicPageCall = async (payload) => {
+  const r = await fetch("/api/shop-page", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Erreur");
+  return j;
+};
+
+function PublicPageCard({ shopId, shopName, publicSlug, setPublicSlug, publicPhone, setPublicPhone, snapshotInput }) {
+  const [slugDraft, setSlugDraft] = useState(publicSlug || "");
+  const [phoneDraft, setPhoneDraft] = useState(publicPhone || "");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ t: "", bad: false });
+  const url = publicSlug ? `${window.location.origin}/s/${publicSlug}` : "";
+  const suggested = (shopName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  const publish = async () => {
+    const digits = phoneDraft.replace(/[^\d]/g, "");
+    if (phoneDraft.trim() && !/^\d{8,15}$/.test(digits)) return setMsg({ t: "Numéro WhatsApp invalide : indique-le avec l'indicatif, par exemple 228 97 61 33 12.", bad: true });
+    setBusy(true); setMsg({ t: "", bad: false });
+    try {
+      setPublicPhone(digits);
+      const j = await publicPageCall({ action: "publish", shopId, slug: slugDraft.trim() || suggested, snapshot: buildPublicSnapshot({ ...snapshotInput, publicPhone: digits }) });
+      setPublicSlug(j.slug); setSlugDraft(j.slug);
+      setMsg({ t: "✓ Ta page est en ligne.", bad: false });
+    } catch (e) { setMsg({ t: e.message || "Publication impossible.", bad: true }); }
+    setBusy(false);
+  };
+  const unpublish = async () => {
+    if (!window.confirm("Retirer ta page publique ? Le lien ne fonctionnera plus.")) return;
+    setBusy(true);
+    try { await publicPageCall({ action: "unpublish", shopId }); setPublicSlug(""); setMsg({ t: "Page retirée.", bad: false }); } catch (e) { setMsg({ t: e.message || "Échec.", bad: true }); }
+    setBusy(false);
+  };
+  const inp = "w-full px-3 min-h-[44px] rounded-lg outline-none text-base";
+  const st = { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Page publique du commerce</div>
+      <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+        <p className="text-xs" style={{ color: "#6B6558" }}>Une page web à partager avec tes clients : tes produits avec photo et prix, ta chaîne WhatsApp et un bouton pour commander. Le stock exact et tes coûts ne sont jamais affichés.</p>
+        <label className="block"><span className="text-xs block mb-1" style={{ color: "#6B6558" }}>Nom dans le lien</span>
+          <div className="flex items-center gap-1 text-sm" style={{ color: "#6B6558" }}><span className="shrink-0">…/s/</span><input id="pp-slug" value={slugDraft} onChange={(e) => setSlugDraft(e.target.value.toLowerCase())} placeholder={suggested || "mon-commerce"} maxLength={40} className={inp} style={st} /></div>
+        </label>
+        <label className="block"><span className="text-xs block mb-1" style={{ color: "#6B6558" }}>Numéro WhatsApp pour recevoir les commandes (avec l'indicatif)</span>
+          <input value={phoneDraft} onChange={(e) => setPhoneDraft(e.target.value)} inputMode="tel" placeholder="228 …" maxLength={20} className={inp} style={st} /></label>
+        <button type="button" disabled={busy} onClick={publish} className="w-full min-h-[44px] rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>{busy ? "…" : publicSlug ? "Mettre à jour ma page" : "Publier ma page"}</button>
+        {publicSlug && (
+          <div className="space-y-2">
+            <p className="text-xs break-all" style={{ color: "#1B1F1C" }}>{url}</p>
+            <div className="grid grid-cols-3 gap-2">
+              <a href={url} target="_blank" rel="noopener noreferrer" className="min-h-[44px] rounded-lg text-sm flex items-center justify-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }}>Voir</a>
+              <button type="button" className="min-h-[44px] rounded-lg text-sm" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} onClick={async () => { try { await navigator.clipboard.writeText(url); setMsg({ t: "Lien copié.", bad: false }); } catch (e) { setMsg({ t: url, bad: false }); } }}>Copier</button>
+              <button type="button" className="min-h-[44px] rounded-lg text-sm font-medium" style={{ background: "#16A34A1A", color: "#15803D", border: "1px solid #16A34A55" }} onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`🛍️ Découvrez ${shopName || "notre commerce"} : produits, prix et commande sur WhatsApp → ${url}`)}`, "_blank")}>Partager</button>
+            </div>
+            <button type="button" disabled={busy} onClick={unpublish} className="w-full min-h-[44px] text-sm" style={{ color: "#B3321F" }}>Retirer ma page</button>
+          </div>
+        )}
+        {msg.t && <p role="status" className="text-xs" style={{ color: msg.bad ? "#B3321F" : "#15803D" }}>{msg.t}</p>}
+      </div>
+    </div>
+  );
+}
+
+function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, shopChannel, setShopChannel, publicSlug, setPublicSlug, publicPhone, setPublicPhone, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -4247,6 +4319,8 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
           </div>
         );
       })()}
+
+      {isAdmin && <PublicPageCard shopId={shopId} shopName={shopName} publicSlug={publicSlug} setPublicSlug={setPublicSlug} publicPhone={publicPhone} setPublicPhone={setPublicPhone} snapshotInput={{ shopName, shopLogoUrl, shopChannel, hours, shopLocation, products }} />}
 
       {isAdmin && (
         <div>
@@ -5134,6 +5208,20 @@ function AppInner() {
   const [closures, setClosures, closuresLoaded] = useShared(k("closures"), [], pendingRef, bumpSync);
   const [receiptFormat, setReceiptFormat] = useShared(k("receiptFormat"), "58mm", pendingRef, bumpSync);
   const [shopChannel, setShopChannel] = useShared(k("whatsappChannel"), "", pendingRef, bumpSync);
+  const [publicSlug, setPublicSlug] = useShared(k("publicSlug"), "", pendingRef, bumpSync);
+  const [publicPhone, setPublicPhone] = useShared(k("publicPhone"), "", pendingRef, bumpSync);
+  const lastPublicRef = useRef("");
+  useEffect(() => {
+    // Garde la page publique à jour (produits, prix, disponibilité) quand elle est publiée.
+    if (!publicSlug || !shopId || !productsLoaded) return undefined;
+    const snap = buildPublicSnapshot({ shopName, shopLogoUrl, shopChannel, publicPhone, hours, shopLocation, products });
+    const sig = JSON.stringify(snap);
+    if (sig === lastPublicRef.current) return undefined;
+    const t = setTimeout(() => {
+      publicPageCall({ action: "publish", shopId, slug: publicSlug, snapshot: snap }).then(() => { lastPublicRef.current = sig; }).catch(() => {});
+    }, 6000);
+    return () => clearTimeout(t);
+  }, [publicSlug, shopId, productsLoaded, shopName, shopLogoUrl, shopChannel, publicPhone, hours, shopLocation, products]);
 
   const [tab, setTab] = useState("stock");
   const [modalProduct, setModalProduct] = useState(null);
@@ -6252,6 +6340,10 @@ function AppInner() {
             setReceiptFormat={setReceiptFormat}
             shopChannel={shopChannel}
             setShopChannel={setShopChannel}
+            publicSlug={publicSlug}
+            setPublicSlug={setPublicSlug}
+            publicPhone={publicPhone}
+            setPublicPhone={setPublicPhone}
             purchases={purchases}
             onAddPurchase={addPurchase}
             onDeletePurchase={deletePurchase}
