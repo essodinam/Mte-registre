@@ -1269,7 +1269,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
       {ownerGate && (
         <PasswordGate
           title="Mot de passe gérant"
-          subtitle="Ce code t'est réservé, communique-le au commerçant une fois son abonnement confirmé"
+          subtitle="Réservé au propriétaire de MTE Registre. Les commerçants inscrits en ligne n'en ont pas besoin."
           onSubmit={handleOwnerPin}
           onBio={BIOMETRIC_SUPPORTED && adminBioLocal("owner") ? handleOwnerBio : null}
           onCancel={() => { setOwnerGate(false); setOwnerError(""); }}
