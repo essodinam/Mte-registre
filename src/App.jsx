@@ -1147,32 +1147,7 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
   const [mode, setMode] = useState(null); // null | 'join' | 'signup'
   const [pickedType, setPickedType] = useState(null);
   const [code, setCode] = useState("");
-  const [ownerGate, setOwnerGate] = useState(false);
-  const [ownerError, setOwnerError] = useState("");
   const [devPanel, setDevPanel] = useState(false);
-
-  const handleOwnerPin = async (pin) => {
-    try {
-      await adminCall("verifyOwner", pin);
-      setOwnerGate(false);
-      setOwnerError("");
-      if (BIOMETRIC_SUPPORTED && !adminBioLocal("owner") && window.confirm("Activer l'empreinte sur ce téléphone pour ne plus taper ce code ?")) {
-        try { await adminBioRegister("owner", pin); } catch (e) { window.alert("Empreinte non activée : " + (e?.message || "annulé")); }
-      }
-      onCreate();
-    } catch (e) {
-      setOwnerError(e.status === 401 || e.status === 429 ? e.message : "Connexion impossible : " + e.message);
-    }
-  };
-  const handleOwnerBio = async () => {
-    try {
-      const auth = await adminBioLogin("owner");
-      await adminCall("verifyOwner", auth);
-      setOwnerGate(false);
-      setOwnerError("");
-      onCreate();
-    } catch (e) { setOwnerError(e?.message || "Empreinte refusée."); }
-  };
 
   if (mode === "signup") return <SignupForm businessType={pickedType} onBack={() => setMode(null)} />;
 
@@ -1253,9 +1228,6 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
           </a>
         </div>
         <div className="flex items-center justify-center gap-3 pt-3" style={{ borderTop: "1px solid #DCD5C6" }}>
-          <button onClick={() => setOwnerGate(true)} className="text-xs px-4 min-h-[44px] rounded-full" style={{ color: "#7A5C22", border: "1px solid #C08A3E88" }}>
-            Espace gérant
-          </button>
           {onDemo && (
             <button onClick={onDemo} aria-label="Essayer la démo" title="Démo" className="w-11 h-11 rounded-full flex items-center justify-center" style={{ background: "#C08A3E1A", color: "#C08A3E", border: "1px solid #C08A3E66" }}>
               <Sparkles size={16} />
@@ -1266,16 +1238,6 @@ function ShopScreen({ onCreate, onJoin, onDevOpen, onDemo, knownShops, onForget,
           </button>
         </div>
       </div>
-      {ownerGate && (
-        <PasswordGate
-          title="Mot de passe gérant"
-          subtitle="Réservé au propriétaire de MTE Registre. Les commerçants inscrits en ligne n'en ont pas besoin."
-          onSubmit={handleOwnerPin}
-          onBio={BIOMETRIC_SUPPORTED && adminBioLocal("owner") ? handleOwnerBio : null}
-          onCancel={() => { setOwnerGate(false); setOwnerError(""); }}
-          error={ownerError}
-        />
-      )}
       {devPanel && (
         <DevPanel
           onOpenShop={(code) => { setDevPanel(false); onDevOpen(code); }}
