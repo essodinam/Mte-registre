@@ -4044,7 +4044,49 @@ function PublicPageCard({ shopId, shopName, publicSlug, setPublicSlug, publicPho
   );
 }
 
-function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, shopChannel, setShopChannel, publicSlug, setPublicSlug, publicPhone, setPublicPhone, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+function ChangeGerantPassword({ shopId, adminPin, setAdminPin }) {
+  const [cur, setCur] = useState("");
+  const [n1, setN1] = useState("");
+  const [n2, setN2] = useState("");
+  const [show, setShow] = useState(false);
+  const [msg, setMsg] = useState({ t: "", bad: false });
+  const [busy, setBusy] = useState(false);
+  const fails = useRef(0);
+  const save = async () => {
+    setMsg({ t: "", bad: false });
+    if (n1.length < 6) return setMsg({ t: "Le nouveau mot de passe doit avoir au moins 6 caractères.", bad: true });
+    if (/^(.)\1+$/.test(n1)) return setMsg({ t: "Mot de passe trop simple.", bad: true });
+    if (n1 !== n2) return setMsg({ t: "Les deux nouveaux mots de passe sont différents.", bad: true });
+    if (fails.current >= 5) return setMsg({ t: "Trop d'essais. Ferme et rouvre les réglages dans une minute.", bad: true });
+    setBusy(true);
+    try {
+      if (!(await pinMatches(cur, adminPin, `${shopId}:gerant`))) { fails.current += 1; setBusy(false); return setMsg({ t: "Mot de passe actuel incorrect.", bad: true }); }
+      setAdminPin(await hashPin(n1, `${shopId}:gerant`));
+      setCur(""); setN1(""); setN2(""); fails.current = 0;
+      setMsg({ t: "✓ Mot de passe modifié. Utilise-le à ta prochaine connexion.", bad: false });
+    } catch (e) { setMsg({ t: "Modification impossible. Réessaie.", bad: true }); }
+    setBusy(false);
+  };
+  const t = show ? "text" : "password";
+  const inp = "w-full px-3 min-h-[44px] rounded-lg outline-none text-base";
+  const st = { background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" };
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Mot de passe gérant</div>
+      <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+        <input type={t} value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" autoCapitalize="none" placeholder="Mot de passe actuel" aria-label="Mot de passe actuel" className={inp} style={st} />
+        <input type={t} value={n1} onChange={(e) => setN1(e.target.value)} autoComplete="new-password" autoCapitalize="none" placeholder="Nouveau mot de passe (6 caractères min.)" aria-label="Nouveau mot de passe" className={inp} style={st} />
+        <input type={t} value={n2} onChange={(e) => setN2(e.target.value)} autoComplete="new-password" autoCapitalize="none" placeholder="Confirme le nouveau mot de passe" aria-label="Confirmer le nouveau mot de passe" className={inp} style={st} />
+        <button type="button" onClick={() => setShow((x) => !x)} className="min-h-[44px] text-sm" style={{ color: "#6B6558" }}>{show ? "Masquer" : "Afficher"} les mots de passe</button>
+        <button type="button" disabled={busy || !cur || !n1 || !n2} onClick={save} className="w-full min-h-[44px] rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>Changer mon mot de passe</button>
+        {msg.t && <p role="status" className="text-xs" style={{ color: msg.bad ? "#B3321F" : "#15803D" }}>{msg.t}</p>}
+        <p className="text-[10px]" style={{ color: "#6B6558" }}>Lettres et chiffres acceptés. Tu peux le changer quand tu veux.</p>
+      </div>
+    </div>
+  );
+}
+
+function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, shopChannel, setShopChannel, publicSlug, setPublicSlug, publicPhone, setPublicPhone, adminPin, setAdminPin, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -4362,6 +4404,8 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
           </div>
         );
       })()}
+
+      {isAdmin && <ChangeGerantPassword shopId={shopId} adminPin={adminPin} setAdminPin={setAdminPin} />}
 
       {isAdmin && <PublicPageCard shopId={shopId} shopName={shopName} publicSlug={publicSlug} setPublicSlug={setPublicSlug} publicPhone={publicPhone} setPublicPhone={setPublicPhone} snapshotInput={{ shopName, shopLogoUrl, shopChannel, hours, shopLocation, products }} />}
 
@@ -5911,6 +5955,8 @@ function AppInner() {
   // d'annulation ou d'absence d'empreinte enregistrée, on retombe sur le code à 4 chiffres.
   const requestGerantLogin = async () => {
     setPinError("");
+    // Commerce créé par inscription en ligne : le gérant n'a pas encore de mot de passe, il le crée lui-même.
+    if (!adminPin) { setPinTarget(null); setPinPrompt("create-gerant"); return; }
     const cred = biometricCreds["gerant"];
     if (cred && BIOMETRIC_SUPPORTED) {
       try {
@@ -6386,6 +6432,8 @@ function AppInner() {
             setShopChannel={setShopChannel}
             publicSlug={publicSlug}
             setPublicSlug={setPublicSlug}
+            adminPin={adminPin}
+            setAdminPin={setAdminPin}
             publicPhone={publicPhone}
             setPublicPhone={setPublicPhone}
             purchases={purchases}
