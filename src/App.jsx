@@ -1830,7 +1830,7 @@ const productMeta = (p) => {
 const productSearchText = (p) => [p.name, p.reference, p.brand, p.model, p.serial, p.supplier, p.sizeSpec].filter(Boolean).join(" ").toLowerCase();
 const addMonthsFr = (ts, m) => { const d = new Date(ts); d.setMonth(d.getMonth() + (parseInt(m) || 0)); return d.toLocaleDateString("fr-FR"); };
 
-function ReceiptModal({ receipt, onClose, format = "58mm" }) {
+function ReceiptModal({ receipt, onClose, format = "58mm", channel = "" }) {
   const { shopName, businessTypeLabel, items, total, date, cashierName, clientName, clientPhone, paymentMethod } = receipt;
   const d = new Date(date);
   const sendToClient = () => {
@@ -1844,6 +1844,7 @@ function ReceiptModal({ receipt, onClose, format = "58mm" }) {
       paymentMethod ? `Paiement : ${paymentLabel(paymentMethod)}` : null,
       "",
       "Merci de votre confiance !",
+      channel ? `\n📢 Suivez-nous sur WhatsApp : ${channel}` : null,
     ].filter((l) => l !== null).join("\n");
     window.open(`https://wa.me/${waPhone(clientPhone)}?text=${encodeURIComponent(lines)}`, "_blank");
   };
@@ -1898,6 +1899,7 @@ function ReceiptModal({ receipt, onClose, format = "58mm" }) {
           {paymentMethod && <><br />Paiement : {paymentLabel(paymentMethod)}</>}
         </div>
         <p className="text-[9px] text-center opacity-60 pt-1">Merci de votre confiance</p>
+        {channel && <p className="text-[9px] text-center break-all">Suivez-nous sur WhatsApp : {channel}</p>}
 
         {clientPhone && (
           <button onClick={sendToClient} className="no-print w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2" style={{ background: "#25D36622", color: "#1B9E52", border: "1px solid #25D36655" }}>
@@ -3927,7 +3929,7 @@ function CategoryManager({ categories, products, onSave, onRename, title = "Cat�
   );
 }
 
-function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
+function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRestore, onUpdatePerson, depots, onSaveDepots, onRenameDepot, categories, onSaveCategories, onRenameCategory, businessType, setBusinessType, isAdmin, currentUser, onLogout, sellers, onAddSeller, onRemoveSeller, onRenameSeller, onUpdateCommission, onUpdateSellerHourlyRate, onAddSellerLoan, onRepaySellerLoan, cashiers, onAddCashier, onRemoveCashier, onRenameCashier, onUpdateCashierHourlyRate, onAddCashierLoan, onRepayCashierLoan, onReset, hours, setHours, shopLocation, setShopLocation, shopLogoUrl, setShopLogoUrl, shopId, shopName, setShopName, onLeaveShop, sales, products, expenses, gerantEmail, setGerantEmail, alertPhones, setAlertPhones, loyaltyRate, setLoyaltyRate, receiptFormat, setReceiptFormat, shopChannel, setShopChannel, purchases, onAddPurchase, onDeletePurchase, closures, onAddClosure, clients, onEndService }) {
   const [confirming, setConfirming] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCommission, setNewCommission] = useState("");
@@ -3939,6 +3941,8 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
   const phonesKey = JSON.stringify(alertPhones || []);
   useEffect(() => { setPhonesDraft(padPhones(alertPhones)); }, [phonesKey]);
   const [emailDraft, setEmailDraft] = useState(gerantEmail || "");
+  const [channelDraft, setChannelDraft] = useState(shopChannel || "");
+  const [channelMsg, setChannelMsg] = useState("");
   const [emailSaved, setEmailSaved] = useState(false);
   const [loyaltyDraft, setLoyaltyDraft] = useState(loyaltyRate || "");
   const [showPurchases, setShowPurchases] = useState(false);
@@ -4243,6 +4247,25 @@ function ReglagesTab({ lockMinutes, setLockMinutes, backupInfo, onBackup, onRest
           </div>
         );
       })()}
+
+      {isAdmin && (
+        <div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: "#16A34A" }}>Chaîne WhatsApp du commerce</div>
+          <div className="rounded-lg p-3 space-y-2" style={{ background: "#F0ECE3", border: "1px solid #DCD5C6" }}>
+            <input value={channelDraft} onChange={(e) => { setChannelDraft(e.target.value); setChannelMsg(""); }} inputMode="url" placeholder="https://whatsapp.com/channel/…" aria-label="Lien de ta chaîne WhatsApp" className="w-full px-3 min-h-[44px] rounded-lg outline-none text-base" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6", color: "#1B1F1C" }} />
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" className="min-h-[44px] rounded-lg text-sm font-medium" style={{ background: "#1B1F1C", color: "#F0ECE3" }} onClick={() => {
+                const v = channelDraft.trim();
+                if (v && !/^https:\/\/(www\.)?whatsapp\.com\/channel\/[\w-]{10,}\/?$/.test(v)) { setChannelMsg("Lien invalide : il doit commencer par https://whatsapp.com/channel/"); return; }
+                setShopChannel(v); setChannelMsg(v ? "✓ Enregistré : le lien apparaît sur tes tickets." : "Lien retiré.");
+              }}>Enregistrer</button>
+              <button type="button" disabled={!shopChannel} className="min-h-[44px] rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#16A34A1A", color: "#15803D", border: "1px solid #16A34A55" }} onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`📢 Suivez ${shopName || "notre commerce"} sur WhatsApp pour ne rien rater de nos nouveautés et promotions : ${shopChannel}`)}`, "_blank")}>Partager</button>
+            </div>
+            {channelMsg && <p role="status" className="text-xs" style={{ color: channelMsg.startsWith("Lien invalide") ? "#B3321F" : "#15803D" }}>{channelMsg}</p>}
+            <p className="text-[10px]" style={{ color: "#6B6558" }}>Crée ta chaîne dans WhatsApp (Actus → + → Créer une chaîne), copie son lien ici : il sera imprimé sur tes tickets et envoyé aux clients avec leur ticket WhatsApp.</p>
+          </div>
+        </div>
+      )}
 
       {isAdmin && (
         <div>
@@ -5110,6 +5133,7 @@ function AppInner() {
   const [purchases, setPurchases, purchasesLoaded] = useShared(k("purchases"), [], pendingRef, bumpSync);
   const [closures, setClosures, closuresLoaded] = useShared(k("closures"), [], pendingRef, bumpSync);
   const [receiptFormat, setReceiptFormat] = useShared(k("receiptFormat"), "58mm", pendingRef, bumpSync);
+  const [shopChannel, setShopChannel] = useShared(k("whatsappChannel"), "", pendingRef, bumpSync);
 
   const [tab, setTab] = useState("stock");
   const [modalProduct, setModalProduct] = useState(null);
@@ -6226,6 +6250,8 @@ function AppInner() {
             setLoyaltyRate={setLoyaltyRate}
             receiptFormat={receiptFormat}
             setReceiptFormat={setReceiptFormat}
+            shopChannel={shopChannel}
+            setShopChannel={setShopChannel}
             purchases={purchases}
             onAddPurchase={addPurchase}
             onDeletePurchase={deletePurchase}
@@ -6236,7 +6262,7 @@ function AppInner() {
         )}
       </main>
 
-      {receiptData && <ReceiptModal receipt={receiptData} onClose={() => setReceiptData(null)} format={receiptFormat} />}
+      {receiptData && <ReceiptModal receipt={receiptData} onClose={() => setReceiptData(null)} format={receiptFormat} channel={shopChannel} />}
 
       <nav className="fixed bottom-0 left-0 right-0 z-10 md:hidden" style={{ background: "#FFFFFF", borderTop: "1px solid #DCD5C6" }}>
         <div className="max-w-lg mx-auto grid" style={{ gridTemplateColumns: `repeat(${TABS.length}, minmax(0, 1fr))` }}>
