@@ -428,6 +428,49 @@ function PinPad({ title, subtitle, onSubmit, onCancel, error }) {
   );
 }
 
+/* ---------- Mot de passe du gérant (lettres + chiffres) ---------- */
+function GerantPasswordPad({ create, onSubmit, onCancel, error }) {
+  const [v, setV] = useState("");
+  const [v2, setV2] = useState("");
+  const [show, setShow] = useState(false);
+  const [local, setLocal] = useState("");
+  const go = () => {
+    setLocal("");
+    if (!v) return;
+    if (create) {
+      if (v.length < 6) return setLocal("Au moins 6 caractères.");
+      if (/^\d+$/.test(v) && /^(\d)\1+$/.test(v)) return setLocal("Mot de passe trop simple.");
+      if (v !== v2) return setLocal("Les deux mots de passe sont différents.");
+    }
+    onSubmit(v);
+    setV(""); setV2("");
+  };
+  const inp = "w-full px-4 min-h-[48px] rounded-lg text-center outline-none text-lg";
+  const st = { background: "#F0ECE3", border: "1px solid #DCD5C6", color: "#1B1F1C", fontFamily: "'Carlito', sans-serif" };
+  const msg = local || error;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: "#00000099" }} onClick={onCancel}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xs rounded-2xl p-6 space-y-3 text-center" style={{ background: "#FFFFFF", border: "1px solid #DCD5C6" }}>
+        <Lock size={22} style={{ color: "#1B1F1C" }} className="mx-auto" />
+        <div>
+          <h3 style={{ fontFamily: "'Carlito', sans-serif", color: "#1B1F1C" }} className="text-lg">{create ? "Crée ton mot de passe gérant" : "Mot de passe gérant"}</h3>
+          <p className="text-xs mt-1" style={{ color: "#6B6558" }}>{create ? "6 caractères minimum : lettres et chiffres. Ne le partage avec personne." : "Entre ton mot de passe"}</p>
+        </div>
+        <input type={show ? "text" : "password"} value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !create) go(); }} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete={create ? "new-password" : "current-password"} aria-label="Mot de passe" placeholder={create ? "Mot de passe" : ""} className={inp} style={st} />
+        {create && <input type={show ? "text" : "password"} value={v2} onChange={(e) => setV2(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") go(); }} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="new-password" aria-label="Confirmer le mot de passe" placeholder="Confirme le mot de passe" className={inp} style={st} />}
+        <button type="button" onClick={() => setShow((x) => !x)} className="min-h-[44px] text-sm" style={{ color: "#6B6558" }}>{show ? "Masquer" : "Afficher"} le mot de passe</button>
+        {msg && <p role="alert" className="text-xs" style={{ color: "#B3321F" }}>{msg}</p>}
+        <button disabled={!v || (create && !v2)} onClick={go} className="w-full min-h-[48px] rounded-lg text-sm font-medium disabled:opacity-40" style={{ background: "#1B1F1C", color: "#F0ECE3" }}>Valider</button>
+        <button onClick={onCancel} className="w-full min-h-[44px] text-sm" style={{ color: "#6B6558" }}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+function CodePad({ kind, ...props }) {
+  if (kind === "create-gerant" || kind === "login-gerant") return <GerantPasswordPad create={kind === "create-gerant"} onSubmit={props.onSubmit} onCancel={props.onCancel} error={props.error} />;
+  return <PinPad {...props} />;
+}
+
 /* ---------- Portail mot de passe libre (ex : Espace gérant) ---------- */
 function PasswordGate({ title, subtitle, onSubmit, onCancel, error, onBio }) {
   const [value, setValue] = useState("");
@@ -5948,7 +5991,7 @@ function AppInner() {
     const fail = () => {
       pinFailsRef.current.n += 1;
       if (pinFailsRef.current.n >= 5) { pinFailsRef.current = { n: 0, until: Date.now() + 60000 }; setPinError("Trop d'essais. Réessaie dans une minute."); }
-      else setPinError("Code incorrect");
+      else setPinError(pinPrompt === "login-gerant" ? "Mot de passe incorrect" : "Code incorrect");
     };
     const ok = () => { pinFailsRef.current = { n: 0, until: 0 }; };
     if (pinPrompt === "create-gerant") {
@@ -6042,7 +6085,7 @@ function AppInner() {
           </div>
         </div>
         {pinPrompt && (
-          <PinPad title="Crée ton code gérant" subtitle="4 chiffres, à ne partager qu'avec toi-même" onSubmit={handlePinSubmit} onCancel={() => setPinPrompt(null)} error={pinError} />
+          <CodePad kind={pinPrompt} title="Crée ton code gérant" subtitle="4 chiffres, à ne partager qu'avec toi-même" onSubmit={handlePinSubmit} onCancel={() => setPinPrompt(null)} error={pinError} />
         )}
       </div>
     );
@@ -6106,7 +6149,8 @@ function AppInner() {
         <style>{fontImport}</style>
         <LoginScreen sellers={sellers} cashiers={cashiers} onPickGerant={requestGerantLogin} onPickVendeur={requestVendeurLogin} onPickCaissier={requestCaissierLogin} biometricCreds={biometricCreds} onBack={leaveShop} />
         {pinPrompt && (
-          <PinPad
+          <CodePad
+            kind={pinPrompt}
             title={pinPrompt === "login-vendeur" || pinPrompt === "login-caissier" ? `Code de ${pinTarget?.name}` : "Code gérant"}
             subtitle="Entre le code à 4 chiffres"
             onSubmit={handlePinSubmit}
@@ -6372,7 +6416,8 @@ function AppInner() {
       )}
 
       {pinPrompt && (
-        <PinPad
+        <CodePad
+          kind={pinPrompt}
           title={pinPrompt === "create-vendeur" || pinPrompt === "create-caissier" ? `Code pour ${pinTarget?.name}` : "Code gérant"}
           subtitle={pinPrompt.startsWith("create") ? "4 chiffres, à ne partager qu'avec la bonne personne" : "Entre le code à 4 chiffres"}
           onSubmit={handlePinSubmit}
